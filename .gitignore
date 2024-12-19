@@ -4,3 +4,7 @@ output
 build
 tensorboard_3d
 screenshots
+
+# Add ignore
+
+inputs
