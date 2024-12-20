@@ -50,7 +50,7 @@ def copy_and_rename_images(images, base_path):
             new_name = f"{idx}_{image_id}_{direction}.jpg"
             
             # Get image file path (you need to modify this to the actual location of your images)
-            image_path = f"base_path/ss_raw_images/level_2/color/{image_id}_{direction}.jpg"
+            image_path = f"{base_path}/ss_raw_images/images/level_2/color/{image_id}_{direction}.jpg"
             
             # Determine the camera folder
             cam_folder = os.path.join(inputs_image_folder, f"cam{camNum+1}")
@@ -83,11 +83,20 @@ def update_exif(image_path, latitude, longitude):
 
     def to_exif_rational(number):
         """Convert a number to EXIF rational format (numerator/denominator)."""
-        return (int(number * 1000000), 1000000)
+        # Use smaller scaling to avoid very large values
+        denominator = 1
+        while number % 1 != 0 and denominator <= 1000000:
+            number *= 10
+            denominator *= 10
+        return int(number), denominator
+
 
     # Convert latitude and longitude to DMS
     lat_dms = decimal_to_dms(abs(latitude))
     lon_dms = decimal_to_dms(abs(longitude))
+
+    print(lat_dms)
+    print(lon_dms)
     
     # Determine the references (N/S, E/W)
     lat_ref = b"N" if latitude >= 0 else b"S"
@@ -100,6 +109,9 @@ def update_exif(image_path, latitude, longitude):
         piexif.GPSIFD.GPSLongitudeRef: lon_ref,
         piexif.GPSIFD.GPSLongitude: [to_exif_rational(v) for v in lon_dms],
     }
+
+    print("Latitude rational values:", [to_exif_rational(v) for v in lat_dms])
+    print("Longitude rational values:", [to_exif_rational(v) for v in lon_dms])
     
     # Load existing EXIF data and update GPS IFD
     exif_dict = piexif.load(image_path)
@@ -118,7 +130,7 @@ def main(json_file, base_path):
 
 # Call the main function
 if __name__ == "__main__":
-    base_path = os.path.join(os.path.abspath(__file__), "..")
+    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     json_file = os.path.join(base_path, "ss_raw_images/recording_details.json")
     main(json_file, base_path)
 
