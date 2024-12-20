@@ -1,10 +1,9 @@
 import os
 import shutil
 from PIL import Image
-from PIL.ExifTags import TAGS
 import json
 from datetime import datetime
-from geopy import distance
+import piexif
 
 # Step 1: Parse JSON to get image info and timestamps
 def parse_json(json_file):
@@ -29,78 +28,97 @@ def sort_images_by_time(image_info):
     sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
     return sorted_images
 
-# Step 3: Create folder structure
-def create_folders(base_path):
-    cams = ['cam1', 'cam2', 'cam3', 'cam4']
-    for cam in cams:
-        cam_path = os.path.join(base_path, cam)
-        if not os.path.exists(cam_path):
-            os.makedirs(cam_path)
-
 # Step 4: Copy and rename images
-def copy_and_rename_images(images, image_info, base_path):
-    # Create folder structure
-    create_folders(base_path)
+def copy_and_rename_images(images, base_path):
+    if not os.path.exists(os.path.join(base_path, "inputsB/images")):
+        os.makedirs(os.path.join(base_path, "inputsB/images"))
+        inputs_image_folder = os.path.join(base_path, "inputsB/images")
+    else:
+        # Throw an error if the folder already exists
+        raise Exception("Input folder already exists. Please remove or rename the existing folder.")
     
-    # Initialize counters for each direction
-    counters = {'f': 1, 'b': 1, 'r': 1, 'l': 1}
-    
+    # Define the directions
+    directions = ['f', 'b', 'l', 'r']
+
     for idx, (image_id, details) in enumerate(images):
-        timestamp = details['timestamp']
+        idx = str(idx).zfill(4)
         lat = details['latitude']
         lon = details['longitude']
         
-        # Determine direction (you can modify this part if you have other criteria to determine direction)
-        direction = 'f'  # Example, replace with actual logic based on image metadata
-        
-        # Get the new filename with incremented number
-        new_name = f"{counters[direction]}_{28992}_{direction}.jpg"
-        counters[direction] += 1
-        
-        # Get image file path (you need to modify this to the actual location of your images)
-        image_path = f"images/{image_id}.jpg"
-        
-        # Determine the camera folder (this logic assumes the direction is the same for each image in the folder)
-        cam_folder = os.path.join(base_path, f"cam{counters[direction] % 4}")
-        
-        # Ensure the destination folder exists
-        if not os.path.exists(cam_folder):
-            os.makedirs(cam_folder)
-        
-        # Copy image to the new folder with the new name
-        shutil.copy(image_path, os.path.join(cam_folder, new_name))
-        
-        # Step 5: Update EXIF data
-        update_exif(os.path.join(cam_folder, new_name), lat, lon)
+        for camNum, direction in enumerate(directions):
+            # Get the new filename with incremented number
+            new_name = f"{idx}_{image_id}_{direction}.jpg"
+            
+            # Get image file path (you need to modify this to the actual location of your images)
+            image_path = f"base_path/ss_raw_images/level_2/color/{image_id}_{direction}.jpg"
+            
+            # Determine the camera folder
+            cam_folder = os.path.join(inputs_image_folder, f"cam{camNum+1}")
+
+            if not os.path.exists(cam_folder):
+                os.makedirs(cam_folder)
+            
+            # Copy image to the new folder with the new name
+            shutil.copy(image_path, os.path.join(cam_folder, new_name))
+            
+            # Step 5: Update EXIF data
+            update_exif(os.path.join(cam_folder, new_name), lat, lon)
 
 # Step 6: Update EXIF data with GPS coordinates
-def update_exif(image_path, lat, lon):
-    img = Image.open(image_path)
+def update_exif(image_path, latitude, longitude):
+    """
+    Update GPS EXIF data in an image.
     
-    # Getting EXIF data
-    exif_data = img._getexif() if img._getexif() is not None else {}
-    
-    # Define GPS information in EXIF format
-    gps_info = {
-        'GPSLatitude': lat,
-        'GPSLongitude': lon
-    }
+    Args:
+        image_path (str): Path to the image file.
+        latitude (float): Latitude in decimal degrees.
+        longitude (float): Longitude in decimal degrees.
+    """
+    def decimal_to_dms(decimal):
+        """Convert decimal coordinates to degrees, minutes, and seconds."""
+        degrees = int(decimal)
+        minutes = int((decimal - degrees) * 60)
+        seconds = round((decimal - degrees - minutes / 60) * 3600, 6)
+        return degrees, minutes, seconds
 
-    # Add GPS information to EXIF
-    exif_data[TAGS['GPSLatitude']] = gps_info['GPSLatitude']
-    exif_data[TAGS['GPSLongitude']] = gps_info['GPSLongitude']
+    def to_exif_rational(number):
+        """Convert a number to EXIF rational format (numerator/denominator)."""
+        return (int(number * 1000000), 1000000)
+
+    # Convert latitude and longitude to DMS
+    lat_dms = decimal_to_dms(abs(latitude))
+    lon_dms = decimal_to_dms(abs(longitude))
     
-    # Save the image with updated EXIF
-    img.save(image_path, exif=exif_data)
+    # Determine the references (N/S, E/W)
+    lat_ref = b"N" if latitude >= 0 else b"S"
+    lon_ref = b"E" if longitude >= 0 else b"W"
+    
+    # Prepare GPS IFD dictionary
+    gps_ifd = {
+        piexif.GPSIFD.GPSLatitudeRef: lat_ref,
+        piexif.GPSIFD.GPSLatitude: [to_exif_rational(v) for v in lat_dms],
+        piexif.GPSIFD.GPSLongitudeRef: lon_ref,
+        piexif.GPSIFD.GPSLongitude: [to_exif_rational(v) for v in lon_dms],
+    }
+    
+    # Load existing EXIF data and update GPS IFD
+    exif_dict = piexif.load(image_path)
+    exif_dict["GPS"] = gps_ifd
+    exif_bytes = piexif.dump(exif_dict)
+    
+    # Save updated EXIF data back to the image
+    image = Image.open(image_path)
+    image.save(image_path, exif=exif_bytes)
 
 # Step 7: Main Function to execute the script
-def main(json_file, base_path="inputs"):
+def main(json_file, base_path):
     image_info = parse_json(json_file)
     sorted_images = sort_images_by_time(image_info)
-    copy_and_rename_images(sorted_images, image_info, base_path)
+    copy_and_rename_images(sorted_images, base_path)
 
 # Call the main function
 if __name__ == "__main__":
-    json_file = "path_to_your_json_file.json"  # Change to your actual JSON file path
-    main(json_file)
+    base_path = os.path.join(os.path.abspath(__file__), "..")
+    json_file = os.path.join(base_path, "ss_raw_images/recording_details.json")
+    main(json_file, base_path)
 
