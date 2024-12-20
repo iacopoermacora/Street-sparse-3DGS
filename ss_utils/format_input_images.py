@@ -1,9 +1,12 @@
 import os
+from pyproj import Transformer
 import shutil
 from PIL import Image
 import json
 from datetime import datetime
 import piexif
+from PIL.ExifTags import TAGS, GPSTAGS
+from fractions import Fraction
 
 # Step 1: Parse JSON to get image info and timestamps
 def parse_json(json_file):
@@ -64,63 +67,53 @@ def copy_and_rename_images(images, base_path):
             # Step 5: Update EXIF data
             update_exif(os.path.join(cam_folder, new_name), lat, lon)
 
-# Step 6: Update EXIF data with GPS coordinates
-def update_exif(image_path, latitude, longitude):
-    """
-    Update GPS EXIF data in an image.
+def convert_to_dms(decimal_degrees):
+    """Convert decimal degrees to degrees, minutes, seconds format"""
+    degrees = int(decimal_degrees)
+    minutes = int((decimal_degrees - degrees) * 60)
+    seconds = ((decimal_degrees - degrees) * 60 - minutes) * 60
     
-    Args:
-        image_path (str): Path to the image file.
-        latitude (float): Latitude in decimal degrees.
-        longitude (float): Longitude in decimal degrees.
-    """
-    def decimal_to_dms(decimal):
-        """Convert decimal coordinates to degrees, minutes, and seconds."""
-        degrees = int(decimal)
-        minutes = int((decimal - degrees) * 60)
-        seconds = round((decimal - degrees - minutes / 60) * 3600, 6)
-        return degrees, minutes, seconds
-
-    def to_exif_rational(number):
-        """Convert a number to EXIF rational format (numerator/denominator)."""
-        # Use smaller scaling to avoid very large values
-        denominator = 1
-        while number % 1 != 0 and denominator <= 1000000:
-            number *= 10
-            denominator *= 10
-        return int(number), denominator
-
-
-    # Convert latitude and longitude to DMS
-    lat_dms = decimal_to_dms(abs(latitude))
-    lon_dms = decimal_to_dms(abs(longitude))
-
-    print(lat_dms)
-    print(lon_dms)
+    # Convert to EXIF format (rationals)
+    degrees = (degrees, 1)
+    minutes = (minutes, 1)
+    seconds = (int(seconds * 10000), 10000)
     
-    # Determine the references (N/S, E/W)
-    lat_ref = b"N" if latitude >= 0 else b"S"
-    lon_ref = b"E" if longitude >= 0 else b"W"
+    return degrees, minutes, seconds
+
+def convert_coordinates(x, y):
+    """Convert RD (Dutch) coordinates to WGS84"""
+    transformer = Transformer.from_crs("EPSG:28992", "EPSG:4326")
+    lat, lon = transformer.transform(x, y)
+    return lat, lon
+
+def update_exif(image_path, lat, lon):
+    """Add GPS information to image EXIF data"""
+
+    # Convert coordinates to WGS84
+    lat, lon = convert_coordinates(lat, lon)
+
+    # Convert decimal coordinates to DMS
+    lat_dms = convert_to_dms(abs(lat))
+    lon_dms = convert_to_dms(abs(lon))
     
-    # Prepare GPS IFD dictionary
+    # Create GPS dictionary
     gps_ifd = {
-        piexif.GPSIFD.GPSLatitudeRef: lat_ref,
-        piexif.GPSIFD.GPSLatitude: [to_exif_rational(v) for v in lat_dms],
-        piexif.GPSIFD.GPSLongitudeRef: lon_ref,
-        piexif.GPSIFD.GPSLongitude: [to_exif_rational(v) for v in lon_dms],
+        piexif.GPSIFD.GPSVersionID: (2, 2, 0, 0),
+        piexif.GPSIFD.GPSLatitudeRef: 'N' if lat >= 0 else 'S',
+        piexif.GPSIFD.GPSLatitude: lat_dms,
+        piexif.GPSIFD.GPSLongitudeRef: 'E' if lon >= 0 else 'W',
+        piexif.GPSIFD.GPSLongitude: lon_dms
     }
-
-    print("Latitude rational values:", [to_exif_rational(v) for v in lat_dms])
-    print("Longitude rational values:", [to_exif_rational(v) for v in lon_dms])
     
-    # Load existing EXIF data and update GPS IFD
-    exif_dict = piexif.load(image_path)
-    exif_dict["GPS"] = gps_ifd
+    # Create EXIF dictionary
+    exif_dict = {"GPS": gps_ifd}
+    
+    # Convert to bytes
     exif_bytes = piexif.dump(exif_dict)
     
-    # Save updated EXIF data back to the image
-    image = Image.open(image_path)
-    image.save(image_path, exif=exif_bytes)
+    # Add EXIF to image
+    im = Image.open(image_path)
+    im.save(image_path, exif=exif_bytes)
 
 # Step 7: Main Function to execute the script
 def main(json_file, base_path):
