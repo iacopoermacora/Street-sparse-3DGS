@@ -8,3 +8,6 @@ screenshots
 # Add ignore
 
 inputs
+camera_calibration
+ss_raw_images
+
