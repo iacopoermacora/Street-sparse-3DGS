@@ -24,7 +24,7 @@ USER docker
 # Setup hierarchical_3d_gaussians
 RUN /opt/conda/bin/python -m ensurepip
 RUN /opt/conda/bin/python -m pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
-RUN /opt/conda/bin/python -m pip install plyfile tqdm joblib exif scikit-learn timm==0.4.5 opencv-python==4.9.0.80 gradio_imageslider gradio==4.29.0 matplotlib
+RUN /opt/conda/bin/python -m pip install plyfile tqdm joblib exif scikit-learn timm==0.4.5 opencv-python==4.9.0.80 gradio_imageslider gradio==4.29.0 matplotlib pyproj Pillow piexif
 
 # Install COLMAP dependencies
 RUN sudo apt-get install -y --no-install-recommends \

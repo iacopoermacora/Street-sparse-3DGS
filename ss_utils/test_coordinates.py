@@ -2,8 +2,8 @@ from exif import Image
 import os
 
 def image_coordinates():
-    image_path = "/home/local/CYCLOMEDIA001/iermacora/Street-sparse-3DGS/inputs/images/cam1"
-    with open(os.path.join(image_path, "aaatest.jpg"), 'rb') as src:
+    image_path = "/home/local/CYCLOMEDIA001/iermacora/Street-sparse-3DGS/inputsB/images/cam1"
+    with open(os.path.join(image_path, "0000_WE92P1B9_f.jpg"), 'rb') as src:
         img = Image(src)
     if img.has_exif:
         try:
