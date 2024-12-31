@@ -51,7 +51,7 @@ def copy_and_rename_images(images, base_path, raw_image_input):
         raise Exception("Input folder already exists. Please remove the existing folder.")
     
     # Define the directions
-    directions = ['f', 'b', 'l', 'r']
+    directions = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
 
     for idx, (image_id, details) in tqdm(enumerate(images), total=len(images)):
         idx = str(idx).zfill(4)
