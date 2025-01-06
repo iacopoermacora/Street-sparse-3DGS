@@ -33,17 +33,26 @@ def read_images_binary(file_path):
             camera_id = struct.unpack("<I", f.read(4))[0]
             name = ""
             while True:
-                char = f.read(1).decode("utf-8")
-                if char == "\0":
+                char = f.read(1)
+                if not char or char == b"\0":
                     break
-                name += char
-            num_points = struct.unpack("<I", f.read(4))[0]
+                name += char.decode("utf-8")
+            
+            if f.readable() and f.tell() + 4 <= os.fstat(f.fileno()).st_size:
+                num_points = struct.unpack("<I", f.read(4))[0]
+            else:
+                num_points = 0  # Default to no points if the structure is incomplete
+            
             xys = []
             point3D_ids = []
             for _ in range(num_points):
-                x, y, point3D_id = struct.unpack("<ddq", f.read(24))
-                xys.append((x, y))
-                point3D_ids.append(point3D_id)
+                if f.readable() and f.tell() + 24 <= os.fstat(f.fileno()).st_size:
+                    x, y, point3D_id = struct.unpack("<ddq", f.read(24))
+                    xys.append((x, y))
+                    point3D_ids.append(point3D_id)
+                else:
+                    break  # Stop if the file doesn't contain enough bytes
+            
             images[image_id] = {
                 "qw": qw, "qx": qx, "qy": qy, "qz": qz,
                 "tx": tx, "ty": ty, "tz": tz,
@@ -53,6 +62,7 @@ def read_images_binary(file_path):
                 "point3D_ids": np.array(point3D_ids),
             }
     return images
+
 
 def read_points3D_binary(file_path):
     points3D = {}
@@ -138,12 +148,13 @@ def generate_masks(image_folder, output_folder, cameras_file, images_file, point
             # Save mask
             mask_path = os.path.join(output_path, image_name)
             cv2.imwrite(mask_path, combined_mask)
+            break
 
 # Example usage
 generate_masks(
-    image_folder="images",
-    output_folder="masks",
-    cameras_file="cameras.bin",
-    images_file="images.bin",
-    points3D_file="points3D.bin"
+    image_folder="/host/inputs/images",
+    output_folder="/host/inputs/masks",
+    cameras_file="/host/camera_calibration/unrectified/sparse/0/cameras.bin",
+    images_file="/host/camera_calibration/unrectified/sparse/0/images.bin",
+    points3D_file="/host/camera_calibration/unrectified/sparse/0/points3D.bin"
 )
