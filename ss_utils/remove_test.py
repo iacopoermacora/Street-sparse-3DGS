@@ -2,8 +2,11 @@ import os
 import shutil
 
 # Function to delete folders
-def delete_folders():
-    folders_to_delete = ["camera_calibration", "output"]
+def delete_folders(removal):
+    if removal == 'n':
+        folders_to_delete = ["camera_calibration", "output", "inputs", "ss_raw_images", "colmap_output"]
+    else:
+        folders_to_delete = ["output", "camera_calibration"]
 
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     
@@ -16,6 +19,9 @@ def delete_folders():
             print(f"Folder '{folder}' has been removed.")
         else:
             print(f"Error: folder '{folder}' does now exist.")
+    
+    # Make the ss_raw_images folder if it does not exist
+    os.makedirs(os.path.join(base_path, "ss_raw_images"), exist_ok=True)
 
 # Main function to run the script
 def main():
@@ -23,7 +29,9 @@ def main():
     confirmation = input("Do you want to remove the current test data? Make sure to have saved it before proceeding. (y/n): ").strip().lower()
     
     if confirmation == 'y':
-        delete_folders()
+        # Ask if they want a complete removal or just the outputs
+        removal = input("Do you want to remove the outputs only? (y/n): ").strip().lower()
+        delete_folders(removal)
     else:
         print("No data was removed.")
 

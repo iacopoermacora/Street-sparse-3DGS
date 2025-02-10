@@ -2,9 +2,11 @@ import os
 import shutil
 
 # Function to copy the folders
-def copy_folders(source_dir):
-    # List of folders to copy
-    folders_to_copy = ["camera_calibration", "output"]
+def copy_folders(source_dir, toCopy):
+    if toCopy == 1:
+        folders_to_copy = ["camera_calibration", "output", "inputs", "ss_raw_images", "colmap_output"]
+    else:
+        folders_to_copy = ["output", "camera_calibration"]
 
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
@@ -38,7 +40,7 @@ def list_folders(storage_path):
 # Main function to run the script
 def main():
     # Prompt the user to input the source directory (where the folders are stored)
-    storage_path = "/media/raid/iermacora"
+    storage_path = "/media/raid_1/iermacora/Street-sparse-3DGS_outputs/"
 
     # List the available folders in the storage path
     available_folders = list_folders(storage_path)
@@ -68,8 +70,23 @@ def main():
         print(f"The directory '{os.path.join(storage_path, selected_folder)}' does not exist. Please check the path and try again.")
         return
     
-    # Proceed to copy the folders
-    copy_folders(os.path.join(storage_path, selected_folder))
+    # Prompt the user to select the folders to copy
+    print("The following folders are available to copy:")
+    print("1. camera_calibration, Output, Inputs, ss_raw_images")
+    print("2. Output, camera_calibration")
+
+    # Get user selection
+    try:
+        selection2 = int(input(f"Select option 1 or 2: "))
+        if selection2 < 1 or selection2 > 2:
+            print("Invalid selection. Please choose a valid number.")
+            return
+        toCopy = selection2
+        # Proceed to copy the folders
+        copy_folders(os.path.join(storage_path, selected_folder), toCopy)
+    except ValueError:
+        print("Invalid input. Please enter a valid number.")
+        return
 
 # Run the script
 if __name__ == "__main__":

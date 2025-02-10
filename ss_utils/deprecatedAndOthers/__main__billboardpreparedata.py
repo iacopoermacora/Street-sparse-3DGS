@@ -109,20 +109,20 @@ def PrepareData(
     out_distance_image_path_template,
     out_distance_visualization_path_template
 ):
-    hfov = math.radians(120)  # Changed from 90 to 120 # PACOMMENT: Modified this line
+    hfov = math.radians(90)  # Changed from 90 to 120 # PACOMMENT: Modified this line
 
     image_corrections = ParsePoseCorrectionsFromRecordingDetails(recording_details)
 
     image_ids = [str(recording_properties['ImageId']) for recording_properties in recording_details['RecordingProperties'] ]
-    face_names = [ 'f', 'r', 'b', 'l', 'u', 'd'] # PACOMMENT: Added u, d
-    
-    YAW_PITCH_LUT = { # PACOMMENT: Added this.
-        'f': (0, 0),
-        'r': (270, 0),
-        'b': (180, 0),
-        'l': (90, 0),
-        'u': (0, -90),
-        'd': (0, 90)
+    # Updated LUT to cover more angles with 50% overlap
+    face_names = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2', 'd1', 'd2'] # PACOMMENT: modified
+    YAW_PITCH_LUT = { # PACOMMENT: modified
+        'f1': (0, 0), 'f2': (45, 0),
+        'r1': (90, 0), 'r2': (135, 0),
+        'b1': (180, 0), 'b2': (225, 0),
+        'l1': (270, 0), 'l2': (315, 0),
+        'u1': (0, -45), 'u2': (45, -45),
+        'd1': (0, 45), 'd2': (45, 45)
     }
 
     for image_id in image_ids:
@@ -224,3 +224,4 @@ if __name__ == "__main__":
                 out_distance_image_path_template,
                 out_distance_visualization_path_template
                 )
+

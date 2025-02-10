@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Confirmation</title>
+</head>
+<body>
+    <h1>Ready to proceed?</h1>
+    <p>Click the button below to continue.</p>
+    <form action="{{ url_for('process_item') }}" method="get">
+        <button type="submit">Proceed</button>
+    </form>
+</body>
+</html>

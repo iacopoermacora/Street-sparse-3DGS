@@ -16,7 +16,7 @@ RUN wget --quiet \
 
 # Create the user
 RUN addgroup --gid $GROUP_ID user
-RUN useradd --create-home -s /bin/bash --uid $USER_ID --gid $GROUP_ID docker
+RUN useradd -l --create-home -s /bin/bash --uid $USER_ID --gid $GROUP_ID docker
 RUN adduser docker sudo
 RUN echo "docker ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 USER docker
