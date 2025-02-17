@@ -6,6 +6,7 @@ import laspy
 import numpy as np
 from datetime import datetime
 import argparse
+from tqdm import tqdm
 
 def parse_json(json_file):
 
@@ -105,7 +106,7 @@ def write_points3D_txt(output_filename, input_directory): # TODO: Change it, doe
                                 # Set error and tracks to default values (error = 0, empty tracks)
                                 error = 0
                                 track = ""
-                                xi, yi = xi - 136757, yi - 455750  # Adjust coordinates
+                                xi, yi = xi, yi  # Adjust coordinates
                                 # Write the point data to the file
                                 f.write(f"{point_id} {xi:.6f} {yi:.6f} {zi:.6f} {ri:.6f} {gi:.6f} {bi:.6f} {error:.6f} {track}\n")
                             point_id += 1
@@ -237,8 +238,8 @@ def calculate_translation(rotation_matrix, position):
         numpy.ndarray: The translation vector (3x1).
     """
     # str(float(parts[5]) + 136500), str(float(parts[6]) + 455700)
-    position[0] = float(position[0]) - 136757
-    position[1] = float(position[1]) - 455750
+    position[0] = float(position[0])
+    position[1] = float(position[1])
     # Ensure the position is a column vector
     position = np.array(position).reshape(3, 1)
     
@@ -271,10 +272,70 @@ def convert_txt_to_bin(input_path, output_path):
             check=True
         )
         print(f"Successfully converted model from TXT to BIN. Output saved in: {output_path}")
+        # Remove the input files directory
+        os.system(f"rm -r {input_path}")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"COLMAP model_converter failed: {e}")
     except FileNotFoundError:
         raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
+    
+def downsampleLazFile(input_files_path):
+
+    # Merge all the .laz files into a single file
+    merged_file = f"{input_files_path}/merged.laz"
+    os.system(f"pdal merge {input_files_path}/*.laz {merged_file}")
+    # --- Read the LAZ file using laspy 2.0 ---
+    las = laspy.read(merged_file)
+
+    print(f"Read {len(las.points)} points from {merged_file}")
+
+    # --- Get coordinates and compute spatial extents ---
+    X = las.x
+    Y = las.y
+    Z = las.z
+
+    min_x, max_x = X.min(), X.max()
+    min_y, max_y = Y.min(), Y.max()
+    min_z, max_z = Z.min(), Z.max()
+
+    # Define cube side length as (x extent)/100.
+    cell_size = (max_x - min_x) / 50.0
+
+    print(f"Cell (cube) side length: {cell_size}")
+
+    # --- Assign points to 3D cubes ---
+    # Use the same cell size for X, Y, and Z.
+    cell_x = ((X - min_x) / cell_size).astype(int)
+    cell_y = ((Y - min_y) / cell_size).astype(int)
+    cell_z = ((Z - min_z) / cell_size).astype(int)
+
+    # Stack cell indices to create a (N, 3) array.
+    cells = np.column_stack((cell_x, cell_y, cell_z))
+
+    # --- Compute density per cube ---
+    # Get unique cubes along with an inverse mapping and counts.
+    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
+    max_count = counts.max()
+    target_density = max_count / 100
+
+    print(f"Maximum points in a cube: {max_count}")
+    print(f"Target density (max_count / 10): {target_density}")
+
+    # --- Downsample points per cube ---
+    # Create a boolean mask for points to keep.
+    keep = np.full(len(X), False)
+
+    # Loop over each unique cube with a tqdm progress bar.
+    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Processing cubes"):
+        pts_in_cube = np.where(inverse == cell_idx)[0]
+        if cell_count > target_density:
+            # Randomly select int(target_density) points.
+            sampled = np.random.choice(pts_in_cube, int(target_density), replace=False)
+            keep[sampled] = True
+        else:
+            keep[pts_in_cube] = True
+
+    print(f"Keeping {np.count_nonzero(keep)} out of {len(X)} points.")
 
 def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, input_laz_path, faces):
     os.makedirs(output_dir, exist_ok=True)
@@ -351,6 +412,7 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, inp
     # Write COLMAP files
     write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
     write_images_txt(os.path.join(output_dir, 'images.txt'), images)
+    downsampleLazFile(input_laz_path, output_dir)
     write_points3D_txt(os.path.join(output_dir, 'points3D.txt'), input_laz_path)
 
     if not os.path.exists(output_dir_bin):

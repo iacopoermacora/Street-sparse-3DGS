@@ -6,7 +6,7 @@ def delete_folders(removal):
     if removal == 'n':
         folders_to_delete = ["camera_calibration", "output", "inputs", "ss_raw_images", "colmap_output"]
     else:
-        folders_to_delete = ["output", "camera_calibration"]
+        folders_to_delete = ["output", "camera_calibration", "colmap_output"]
 
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     
