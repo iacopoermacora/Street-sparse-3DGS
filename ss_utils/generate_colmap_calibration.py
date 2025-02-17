@@ -56,62 +56,86 @@ def write_images_txt(filename, images):
             tvec_str = ' '.join(map(str, params['tvec']))
             f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
 
-def write_points3D_txt(output_filename, input_directory): # TODO: Change it, does not have to create the pointcloud at the beginning if calibration is cal_sfm or sfm
-    """
-    Reads all .las files in a directory and writes their point cloud data to a single output file.
-
-    Args:
-        output_filename (str): The path to the output file.
-        input_directory (str): The directory containing input .las files.
-    """
-    # Open output file and write the header
+def write_points3D_txt(output_filename, input_files_path):
+    # Merge all .laz files into a single file
+    merged_file = os.path.join(input_files_path, "merged.laz")
+    if not os.path.exists(merged_file):
+        os.system(f"pdal merge {input_files_path}/*.laz {merged_file}")
+    
+    # Read the merged LAZ file
+    las = laspy.read(merged_file)
+    print(f"Read {len(las.points)} points from {merged_file}")
+    
+    # Extract coordinates
+    X = las.x
+    Y = las.y
+    Z = las.z
+    
+    # Compute spatial extents
+    min_x, max_x = X.min(), X.max()
+    min_y, max_y = Y.min(), Y.max()
+    min_z, max_z = Z.min(), Z.max()
+    
+    # Determine cell size for 3D grid
+    cell_size = 1.0
+    print(f"Cell (cube) side length: {cell_size}")
+    
+    # Assign points to 3D cubes
+    cell_x = ((X - min_x) // cell_size).astype(int)
+    cell_y = ((Y - min_y) // cell_size).astype(int)
+    cell_z = ((Z - min_z) // cell_size).astype(int)
+    
+    cells = np.column_stack((cell_x, cell_y, cell_z))
+    
+    # Compute density per cube and collect kept indices
+    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
+    max_count = counts.max()
+    target_density = max_count // 100
+    
+    print(f"Maximum points in a cube: {max_count}")
+    print(f"Target density (max_count / 100): {target_density}")
+    
+    kept_indices = []
+    # Process cubes with progress bar
+    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Downsampling cubes"):
+        pts_in_cube = np.where(inverse == cell_idx)[0]
+        if cell_count > target_density:
+            # Randomly sample points in dense cubes
+            sampled = np.random.choice(pts_in_cube, target_density, replace=False)
+            kept_indices.extend(sampled.tolist())
+        else:
+            # Keep all points in sparse cubes
+            kept_indices.extend(pts_in_cube.tolist())
+    
+    print(f"Selected {len(kept_indices)} points for output.")
+    
+    # Check for color data
+    has_colour = hasattr(las, "red") and hasattr(las, "green") and hasattr(las, "blue")
+    
+    # Write directly to COLMAP format during single pass
     with open(output_filename, 'w') as f:
         f.write('# 3D point list with one line of data per point:\n')
         f.write('#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n')
-        if args.calibration != "cal_sfm" and args.calibration != "sfm":
-            point_id = 1  # To assign unique IDs across files
-
-            # Iterate through all .las files in the directory
-            for file_name in os.listdir(input_directory):
-                if file_name.endswith('.las') or file_name.endswith('.laz'):
-                    input_path = os.path.join(input_directory, file_name)
-                    
-                    print(f"Processing file: {file_name}")
-
-                    # Open the LAS/LAZ file
-                    with laspy.open(input_path) as las_file:
-                        point_cloud = las_file.read()
-                        # Extract coordinates
-                        x = point_cloud.x
-                        y = point_cloud.y
-                        z = point_cloud.z
-
-                        print(f"Extracted coordinates from {file_name}.")
-
-                        # Check if colour data is available
-                        has_colour = hasattr(point_cloud, "red") and hasattr(point_cloud, "green") and hasattr(point_cloud, "blue")
-                        if has_colour:
-                            r = point_cloud.red / 256  # Convert from 16-bit to 8-bit
-                            g = point_cloud.green / 256
-                            b = point_cloud.blue / 256
-                        else:
-                            r = g = b = np.zeros_like(x)
-                        
-                        print(f"Extracted colours from {file_name}.")
-
-                        # Write the point cloud data to the file
-                        for xi, yi, zi, ri, gi, bi in zip(x, y, z, r, g, b):
-                            if point_id % 1000 == 0:
-                                print(f"Writing point {point_id}.")
-                                # Set error and tracks to default values (error = 0, empty tracks)
-                                error = 0
-                                track = ""
-                                xi, yi = xi, yi  # Adjust coordinates
-                                # Write the point data to the file
-                                f.write(f"{point_id} {xi:.6f} {yi:.6f} {zi:.6f} {ri:.6f} {gi:.6f} {bi:.6f} {error:.6f} {track}\n")
-                            point_id += 1
-
-    print(f"Finished writing data to {output_filename}.")
+        
+        # Write points with progress bar
+        for point_id, idx in tqdm(enumerate(kept_indices, 1), total=len(kept_indices), desc="Writing points"):
+            # Get coordinates
+            x = las.x[idx]
+            y = las.y[idx]
+            z = las.z[idx]
+            
+            # Get color values (if available)
+            if has_colour:
+                r = las.red[idx] // 256  # 16-bit to 8-bit conversion
+                g = las.green[idx] // 256
+                b = las.blue[idx] // 256
+            else:
+                r = g = b = 0
+            
+            # Write formatted line
+            f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} 0.000000\n")
+    
+    print(f"Successfully wrote {len(kept_indices)} points to {output_filename}")
 
 def compute_intrinsics(cube_face_size):
     f = cube_face_size / 2  # Focal length assuming 90° FOV
@@ -278,66 +302,11 @@ def convert_txt_to_bin(input_path, output_path):
         raise RuntimeError(f"COLMAP model_converter failed: {e}")
     except FileNotFoundError:
         raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
-    
-def downsampleLazFile(input_files_path):
-
-    # Merge all the .laz files into a single file
-    merged_file = f"{input_files_path}/merged.laz"
-    os.system(f"pdal merge {input_files_path}/*.laz {merged_file}")
-    # --- Read the LAZ file using laspy 2.0 ---
-    las = laspy.read(merged_file)
-
-    print(f"Read {len(las.points)} points from {merged_file}")
-
-    # --- Get coordinates and compute spatial extents ---
-    X = las.x
-    Y = las.y
-    Z = las.z
-
-    min_x, max_x = X.min(), X.max()
-    min_y, max_y = Y.min(), Y.max()
-    min_z, max_z = Z.min(), Z.max()
-
-    # Define cube side length as (x extent)/100.
-    cell_size = (max_x - min_x) / 50.0
-
-    print(f"Cell (cube) side length: {cell_size}")
-
-    # --- Assign points to 3D cubes ---
-    # Use the same cell size for X, Y, and Z.
-    cell_x = ((X - min_x) / cell_size).astype(int)
-    cell_y = ((Y - min_y) / cell_size).astype(int)
-    cell_z = ((Z - min_z) / cell_size).astype(int)
-
-    # Stack cell indices to create a (N, 3) array.
-    cells = np.column_stack((cell_x, cell_y, cell_z))
-
-    # --- Compute density per cube ---
-    # Get unique cubes along with an inverse mapping and counts.
-    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
-    max_count = counts.max()
-    target_density = max_count / 100
-
-    print(f"Maximum points in a cube: {max_count}")
-    print(f"Target density (max_count / 10): {target_density}")
-
-    # --- Downsample points per cube ---
-    # Create a boolean mask for points to keep.
-    keep = np.full(len(X), False)
-
-    # Loop over each unique cube with a tqdm progress bar.
-    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Processing cubes"):
-        pts_in_cube = np.where(inverse == cell_idx)[0]
-        if cell_count > target_density:
-            # Randomly select int(target_density) points.
-            sampled = np.random.choice(pts_in_cube, int(target_density), replace=False)
-            keep[sampled] = True
-        else:
-            keep[pts_in_cube] = True
-
-    print(f"Keeping {np.count_nonzero(keep)} out of {len(X)} points.")
 
 def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, input_laz_path, faces):
+
+    start_time = datetime.now()
+
     os.makedirs(output_dir, exist_ok=True)
 
     # Load recording details
@@ -412,13 +381,14 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, inp
     # Write COLMAP files
     write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
     write_images_txt(os.path.join(output_dir, 'images.txt'), images)
-    downsampleLazFile(input_laz_path, output_dir)
     write_points3D_txt(os.path.join(output_dir, 'points3D.txt'), input_laz_path)
 
     if not os.path.exists(output_dir_bin):
         os.makedirs(output_dir_bin)
     # Convert COLMAP files to binary format
     convert_txt_to_bin(output_dir, output_dir_bin)
+
+    print(f"Total time taken: {datetime.now() - start_time}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
