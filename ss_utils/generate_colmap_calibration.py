@@ -56,86 +56,12 @@ def write_images_txt(filename, images):
             tvec_str = ' '.join(map(str, params['tvec']))
             f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
 
-def write_points3D_txt(output_filename, input_files_path):
-    # Merge all .laz files into a single file
-    merged_file = os.path.join(input_files_path, "merged.laz")
-    if not os.path.exists(merged_file):
-        os.system(f"pdal merge {input_files_path}/*.laz {merged_file}")
-    
-    # Read the merged LAZ file
-    las = laspy.read(merged_file)
-    print(f"Read {len(las.points)} points from {merged_file}")
-    
-    # Extract coordinates
-    X = las.x
-    Y = las.y
-    Z = las.z
-    
-    # Compute spatial extents
-    min_x, max_x = X.min(), X.max()
-    min_y, max_y = Y.min(), Y.max()
-    min_z, max_z = Z.min(), Z.max()
-    
-    # Determine cell size for 3D grid
-    cell_size = 1.0
-    print(f"Cell (cube) side length: {cell_size}")
-    
-    # Assign points to 3D cubes
-    cell_x = ((X - min_x) // cell_size).astype(int)
-    cell_y = ((Y - min_y) // cell_size).astype(int)
-    cell_z = ((Z - min_z) // cell_size).astype(int)
-    
-    cells = np.column_stack((cell_x, cell_y, cell_z))
-    
-    # Compute density per cube and collect kept indices
-    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
-    max_count = counts.max()
-    target_density = max_count // 100
-    
-    print(f"Maximum points in a cube: {max_count}")
-    print(f"Target density (max_count / 100): {target_density}")
-    
-    kept_indices = []
-    # Process cubes with progress bar
-    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Downsampling cubes"):
-        pts_in_cube = np.where(inverse == cell_idx)[0]
-        if cell_count > target_density:
-            # Randomly sample points in dense cubes
-            sampled = np.random.choice(pts_in_cube, target_density, replace=False)
-            kept_indices.extend(sampled.tolist())
-        else:
-            # Keep all points in sparse cubes
-            kept_indices.extend(pts_in_cube.tolist())
-    
-    print(f"Selected {len(kept_indices)} points for output.")
-    
-    # Check for color data
-    has_colour = hasattr(las, "red") and hasattr(las, "green") and hasattr(las, "blue")
+def write_points3D_txt(output_filename):
     
     # Write directly to COLMAP format during single pass
     with open(output_filename, 'w') as f:
         f.write('# 3D point list with one line of data per point:\n')
         f.write('#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n')
-        
-        # Write points with progress bar
-        for point_id, idx in tqdm(enumerate(kept_indices, 1), total=len(kept_indices), desc="Writing points"):
-            # Get coordinates
-            x = las.x[idx]
-            y = las.y[idx]
-            z = las.z[idx]
-            
-            # Get color values (if available)
-            if has_colour:
-                r = las.red[idx] // 256  # 16-bit to 8-bit conversion
-                g = las.green[idx] // 256
-                b = las.blue[idx] // 256
-            else:
-                r = g = b = 0
-            
-            # Write formatted line
-            f.write(f"{point_id} {x:.6f} {y:.6f} {z:.6f} {r} {g} {b} 0.000000\n")
-    
-    print(f"Successfully wrote {len(kept_indices)} points to {output_filename}")
 
 def compute_intrinsics(cube_face_size):
     f = cube_face_size / 2  # Focal length assuming 90° FOV
@@ -303,7 +229,7 @@ def convert_txt_to_bin(input_path, output_path):
     except FileNotFoundError:
         raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
 
-def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, input_laz_path, faces):
+def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces):
 
     start_time = datetime.now()
 
@@ -381,7 +307,7 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, inp
     # Write COLMAP files
     write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
     write_images_txt(os.path.join(output_dir, 'images.txt'), images)
-    write_points3D_txt(os.path.join(output_dir, 'points3D.txt'), input_laz_path)
+    write_points3D_txt(os.path.join(output_dir, 'points3D.txt'))
 
     if not os.path.exists(output_dir_bin):
         os.makedirs(output_dir_bin)
@@ -400,7 +326,6 @@ if __name__ == "__main__":
     recording_details_path = f"{base_path}/ss_raw_images/recording_details.json"
     output_dir = f"{base_path}/colmap_output"
     output_dir_bin = f"{base_path}/camera_calibration/unrectified/sparse/0"
-    input_laz_path = f"{base_path}/ss_raw_images/LiDAR"
     cube_face_size = 1536
     choice = 0
     while choice not in ["1", "2", "3"]:
@@ -418,4 +343,4 @@ if __name__ == "__main__":
                 faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
             else:
                 print("Invalid choice. Please try again.")
-    main(recording_details_path, output_dir, output_dir_bin, cube_face_size, input_laz_path, faces)
+    main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces)

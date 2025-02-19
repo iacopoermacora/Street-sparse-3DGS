@@ -20,40 +20,107 @@ import json
 import laspy
 import tqdm
 
-def read_lidar_points(lidar_dir):
+def process_lidar_points(input_files_path, output_file=None):
     """
-    Reads all LiDAR .laz files in the given directory and returns points and RGB values.
+    Reads and downsamples LiDAR points using a spatial grid-based approach.
+    Can save results to file and load from existing file if available.
+    
+    Args:
+        input_files_path (str): Directory containing .laz files
+        output_file (str, optional): Path to save/load the processed results
+        
+    Returns:
+        tuple: (points, colors) where points is an Nx3 array of XYZ coordinates
+               and colors is an Nx3 array of RGB values (0-255)
     """
-    all_points = []
-    all_colors = []
+    # If output file is specified and exists, load from it
+    if output_file and os.path.exists(output_file):
+        print(f"Loading pre-processed data from {output_file}")
+        data = np.load(output_file)
+        return data['points'], data['colors']
     
-    file_counter = 0
-    for filename in os.listdir(lidar_dir):
-        file_counter += 1
-        print("Reading", filename, ", file ", file_counter, "out of", len(os.listdir(lidar_dir)))
-        if filename.endswith(".laz"):
-            filepath = os.path.join(lidar_dir, filename)
-            las = laspy.read(filepath)
+    # Initialize arrays to store points and colors and min/max values
+    X, Y, Z = np.array([]), np.array([]), np.array([])
+    min_x, max_x = np.inf, -np.inf
+    min_y, max_y = np.inf, -np.inf
+    min_z, max_z = np.inf, -np.inf
 
-            # Extract XYZ
-            xyz = np.vstack((las.x - 136757, las.y - 455750, las.z)).T
-            xyz = xyz[::100]  # Keep one every 100 points
-
-            # Extract RGB (if available)
-            if hasattr(las, 'red') and hasattr(las, 'green') and hasattr(las, 'blue'):
-                rgb = np.vstack((las.red, las.green, las.blue)).T
-                rgb = (rgb / 65535.0 * 255).astype(np.uint8)  # Convert from 16-bit to 8-bit
-            else:
-                rgb = np.zeros((xyz.shape[0], 3), dtype=np.uint8)  # Default black
-            
-            rgb = rgb[::100]  # Keep one every 100 points
-
-            all_points.append(xyz)
-            all_colors.append(rgb)
+    for file in os.listdir(input_files_path):
+        if file.endswith(".laz"):
+            # Read the LAZ file
+            las = laspy.read(file)
+            print(f"Read {len(las.points)} points from {file}")
     
-    if all_points:
-        return np.vstack(all_points), np.vstack(all_colors)
-    return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8)
+            # Extract coordinates
+            X = np.append(X, las.x)
+            Y = np.append(Y, las.y)
+            Z = np.append(Z, las.z)
+
+            # Update min/max values
+            min_x = min(min_x, las.x.min())
+            max_x = max(max_x, las.x.max())
+            min_y = min(min_y, las.y.min())
+            max_y = max(max_y, las.y.max())
+            min_z = min(min_z, las.z.min())
+            max_z = max(max_z, las.z.max())
+
+    print(f"Read a total of {len(X)} points")
+    print(f"X: [{min_x}, {max_x}]")
+    print(f"Y: [{min_y}, {max_y}]")
+    print(f"Z: [{min_z}, {max_z}]")
+    
+    # Determine cell size for 3D grid
+    cell_size = 1.0
+    print(f"Cell (cube) side length: {cell_size}")
+    
+    # Assign points to 3D cubes
+    cell_x = ((X - min_x) // cell_size).astype(int)
+    cell_y = ((Y - min_y) // cell_size).astype(int)
+    cell_z = ((Z - min_z) // cell_size).astype(int)
+    
+    cells = np.column_stack((cell_x, cell_y, cell_z))
+    
+    # Compute density per cube and collect kept indices
+    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
+    max_count = counts.max()
+    target_density = max_count // 100
+    
+    print(f"Maximum points in a cube: {max_count}")
+    print(f"Target density (max_count / 100): {target_density}")
+    
+    kept_indices = []
+    # Process cubes with progress bar
+    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Downsampling cubes"):
+        pts_in_cube = np.where(inverse == cell_idx)[0]
+        if cell_count > target_density:
+            # Randomly sample points in dense cubes
+            sampled = np.random.choice(pts_in_cube, target_density, replace=False)
+            kept_indices.extend(sampled.tolist())
+        else:
+            # Keep all points in sparse cubes
+            kept_indices.extend(pts_in_cube.tolist())
+    
+    kept_indices = np.array(kept_indices)
+    print(f"Selected {len(kept_indices)} points after downsampling.")
+    
+    # Extract final points
+    points = np.vstack((X[kept_indices], Y[kept_indices], Z[kept_indices])).T
+    
+    # Extract and process RGB values
+    if hasattr(las, 'red') and hasattr(las, 'green') and hasattr(las, 'blue'):
+        rgb = np.vstack((las.red[kept_indices], 
+                        las.green[kept_indices], 
+                        las.blue[kept_indices])).T
+        rgb = (rgb / 65535.0 * 255).astype(np.uint8)  # Convert from 16-bit to 8-bit using float division
+    else:
+        rgb = np.zeros((points.shape[0], 3), dtype=np.uint8)  # Default black
+    
+    # Save results if output file is specified
+    if output_file:
+        print(f"Saving processed data to {output_file}")
+        np.savez_compressed(output_file, points=points, colors=rgb)
+    
+    return points, rgb
 
 def process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb):
     """
@@ -93,12 +160,6 @@ if __name__ == '__main__':
         with open(test_file, 'r') as file:
             test_cam_names_list = file.readlines()
             blending_dict = {name[:-1] if name[-1] == '\n' else name: {} for name in test_cam_names_list}
-
-    # Read LiDAR points once
-    print("Reading LiDAR points")
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    LiDAR_path = f"{base_path}/ss_raw_images/LiDAR"
-    lidar_xyz, lidar_rgb = read_lidar_points(LiDAR_path)  # Adjust path if necessary
 
     cam_intrinsics, images_metas, points3d = read_model(args.base_dir, ext=f".{args.model_type}")
 
@@ -248,7 +309,7 @@ if __name__ == '__main__':
                     n_pts = np.isin(image_meta.point3D_ids, new_indices).sum()
                     blending_dict[image_meta.name][f"{i}_{j}"] = str(n_pts)
 
-
+            print(f"Filtering the points for chunk {i}_{j}")
             # Filter LiDAR points for the chunk
             chunk_xyzs, chunk_colors = process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb)
 
@@ -280,6 +341,12 @@ if __name__ == '__main__':
     extent = global_bbox[1] - global_bbox[0]
     n_width = round(extent[0] / args.chunk_size)
     n_height = round(extent[1] / args.chunk_size)
+
+    # Read LiDAR points once
+    print("Reading LiDAR points")
+    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    LiDAR_path = f"{base_path}/ss_raw_images/LiDAR"
+    lidar_xyz, lidar_rgb = process_lidar_points(LiDAR_path, f"{LiDAR_path}/downsampled.npz")  # Adjust path if necessary
 
     for i in range(n_width):
         for j in range(n_height):
