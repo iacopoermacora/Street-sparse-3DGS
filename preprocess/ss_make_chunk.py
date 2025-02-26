@@ -18,11 +18,13 @@ import random
 from read_write_model import *
 import json
 import laspy
-import tqdm
+from tqdm import tqdm
+import open3d as o3d
+import time
 
 def process_lidar_points(input_files_path, output_file=None):
     """
-    Reads and downsamples LiDAR points using a spatial grid-based approach.
+    Reads and downsamples LiDAR points using voxel-based downsampling.
     Can save results to file and load from existing file if available.
     
     Args:
@@ -33,94 +35,92 @@ def process_lidar_points(input_files_path, output_file=None):
         tuple: (points, colors) where points is an Nx3 array of XYZ coordinates
                and colors is an Nx3 array of RGB values (0-255)
     """
-    # If output file is specified and exists, load from it
+    start_time = time.time()
+
+    def downsample_for_max_density(pcd, max_density):
+        """Downsamples a point cloud to ensure its density does not exceed max_density."""
+        print(f"Downsampling point cloud to max density {max_density}")
+        voxel_size = (1.0 / max_density) ** (1/3)
+        return pcd.voxel_down_sample(voxel_size)
+
+    def laz_to_o3d_pointcloud(laz_filepath):
+        """Converts a LAZ file to an Open3D PointCloud."""
+        print(f"Reading {laz_filepath} and converting to Open3D PointCloud")
+        try:
+            lasf = laspy.read(laz_filepath)
+            points = np.vstack((lasf.x, lasf.y, lasf.z)).transpose()
+
+            points[:, 0] = points[:, 0] - 136757
+            points[:, 1] = points[:, 1] - 455750
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(points)
+
+            # Check for color channels
+            color_channels = {}
+            for dim in lasf.header.point_format.dimensions:
+                name = dim.name.lower()
+                if name in ['red', 'green', 'blue']:
+                    color_channels[name] = name
+
+            if len(color_channels) == 3:
+                colors = np.vstack((lasf[color_channels['red']], 
+                                  lasf[color_channels['green']], 
+                                  lasf[color_channels['blue']])).transpose()
+                colors = colors.astype(np.float32) / 65535.0  # Normalize 16-bit to [0,1]
+                pcd.colors = o3d.utility.Vector3dVector(colors)
+            
+            print(f"File converted. Loaded {len(pcd.points)} points")
+
+            return pcd
+        except Exception as e:
+            print(f"Error reading {laz_filepath}: {e}")
+            return None
+
+    # Load pre-processed data if available
     if output_file and os.path.exists(output_file):
         print(f"Loading pre-processed data from {output_file}")
         data = np.load(output_file)
         return data['points'], data['colors']
-    
-    # Initialize arrays to store points and colors and min/max values
-    X, Y, Z = np.array([]), np.array([]), np.array([])
-    min_x, max_x = np.inf, -np.inf
-    min_y, max_y = np.inf, -np.inf
-    min_z, max_z = np.inf, -np.inf
 
-    for file in os.listdir(input_files_path):
-        if file.endswith(".laz"):
-            # Read the LAZ file
-            las = laspy.read(file)
-            print(f"Read {len(las.points)} points from {file}")
-    
-            # Extract coordinates
-            X = np.append(X, las.x)
-            Y = np.append(Y, las.y)
-            Z = np.append(Z, las.z)
+    # Find all LAZ files in the input directory
+    laz_files = [os.path.join(input_files_path, f) for f in os.listdir(input_files_path) 
+                 if f.lower().endswith(".laz")]
+    if not laz_files:
+        print(f"No LAZ files found in {input_files_path}")
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
 
-            # Update min/max values
-            min_x = min(min_x, las.x.min())
-            max_x = max(max_x, las.x.max())
-            min_y = min(min_y, las.y.min())
-            max_y = max(max_y, las.y.max())
-            min_z = min(min_z, las.z.min())
-            max_z = max(max_z, las.z.max())
+    # Process each LAZ file and combine downsampled point clouds
+    combined_pcd = o3d.geometry.PointCloud()
+    for laz_file in tqdm(laz_files):
+        pcd = laz_to_o3d_pointcloud(laz_file)
+        if pcd is None or len(pcd.points) == 0:
+            continue
+        
+        # Downsample with target density of 8000 points per cubic unit
+        downsampled_pcd = downsample_for_max_density(pcd, max_density=2000)
+        combined_pcd += downsampled_pcd  # Combine into the aggregated point cloud
 
-    print(f"Read a total of {len(X)} points")
-    print(f"X: [{min_x}, {max_x}]")
-    print(f"Y: [{min_y}, {max_y}]")
-    print(f"Z: [{min_z}, {max_z}]")
+    # Extract points and colors
+    if len(combined_pcd.points) == 0:
+        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
     
-    # Determine cell size for 3D grid
-    cell_size = 1.0
-    print(f"Cell (cube) side length: {cell_size}")
-    
-    # Assign points to 3D cubes
-    cell_x = ((X - min_x) // cell_size).astype(int)
-    cell_y = ((Y - min_y) // cell_size).astype(int)
-    cell_z = ((Z - min_z) // cell_size).astype(int)
-    
-    cells = np.column_stack((cell_x, cell_y, cell_z))
-    
-    # Compute density per cube and collect kept indices
-    unique_cells, inverse, counts = np.unique(cells, axis=0, return_inverse=True, return_counts=True)
-    max_count = counts.max()
-    target_density = max_count // 100
-    
-    print(f"Maximum points in a cube: {max_count}")
-    print(f"Target density (max_count / 100): {target_density}")
-    
-    kept_indices = []
-    # Process cubes with progress bar
-    for cell_idx, cell_count in tqdm(enumerate(counts), total=len(counts), desc="Downsampling cubes"):
-        pts_in_cube = np.where(inverse == cell_idx)[0]
-        if cell_count > target_density:
-            # Randomly sample points in dense cubes
-            sampled = np.random.choice(pts_in_cube, target_density, replace=False)
-            kept_indices.extend(sampled.tolist())
-        else:
-            # Keep all points in sparse cubes
-            kept_indices.extend(pts_in_cube.tolist())
-    
-    kept_indices = np.array(kept_indices)
-    print(f"Selected {len(kept_indices)} points after downsampling.")
-    
-    # Extract final points
-    points = np.vstack((X[kept_indices], Y[kept_indices], Z[kept_indices])).T
-    
-    # Extract and process RGB values
-    if hasattr(las, 'red') and hasattr(las, 'green') and hasattr(las, 'blue'):
-        rgb = np.vstack((las.red[kept_indices], 
-                        las.green[kept_indices], 
-                        las.blue[kept_indices])).T
-        rgb = (rgb / 65535.0 * 255).astype(np.uint8)  # Convert from 16-bit to 8-bit using float division
+    points = np.asarray(combined_pcd.points, dtype=np.float32)
+    if combined_pcd.has_colors():
+        colors = (np.asarray(combined_pcd.colors) * 255).astype(np.uint8)
     else:
-        rgb = np.zeros((points.shape[0], 3), dtype=np.uint8)  # Default black
+        colors = np.zeros((len(points), 3), dtype=np.uint8)
     
-    # Save results if output file is specified
+    print(f"Total points after downsampling: {len(points)}")
+
+    # Save results if requested
     if output_file:
         print(f"Saving processed data to {output_file}")
-        np.savez_compressed(output_file, points=points, colors=rgb)
+        np.savez_compressed(output_file, points=points, colors=colors)
     
-    return points, rgb
+    print("Processing LiDAR points took", time.time() - start_time)
+
+    return points, colors
 
 def process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb):
     """
@@ -312,6 +312,7 @@ if __name__ == '__main__':
             print(f"Filtering the points for chunk {i}_{j}")
             # Filter LiDAR points for the chunk
             chunk_xyzs, chunk_colors = process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb)
+            print(f"Filtered {len(chunk_xyzs)} LiDAR points out of {len(lidar_xyz)}")
 
             # Generate new unique IDs for points
             new_indices = np.arange(len(chunk_xyzs))

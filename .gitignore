@@ -11,5 +11,5 @@ inputs
 camera_calibration
 ss_raw_images
 ss_utils/static
-colmap_output
+colmap_output_added_bin/
 

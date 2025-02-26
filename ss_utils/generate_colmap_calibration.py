@@ -3,10 +3,10 @@ import numpy as np
 import struct
 import os
 import laspy
-import numpy as np
 from datetime import datetime
 import argparse
 from tqdm import tqdm
+import math
 
 def parse_json(json_file):
 
@@ -46,6 +46,17 @@ def write_cameras_txt(filename, cameras):
             f.write(f'{camera_id} {params["model"]} {params["width"]} {params["height"]} {param_str}\n')
 
 def write_images_txt(filename, images):
+    with open(filename, 'w') as f:
+        f.write('# Image list with one line of data per image:\n')
+        f.write('#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, IMAGE_NAME, \n')
+        f.write('#   POINTS2D[] as (X, Y, POINT3D_ID)\n')
+        f.write('# Number of images: {}\n'.format(len(images)))
+        for image_id, params in images.items():
+            qvec_str = ' '.join(map(str, params['qvec']))
+            tvec_str = ' '.join(map(str, params['tvec']))
+            f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
+
+def write_added_images_txt(filename, images):
     with open(filename, 'w') as f:
         f.write('# Image list with one line of data per image:\n')
         f.write('#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, IMAGE_NAME, \n')
@@ -229,22 +240,26 @@ def convert_txt_to_bin(input_path, output_path):
     except FileNotFoundError:
         raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
 
-def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces):
+def main(recording_details_path, output_dir, output_dir_bin, output_dir_added, output_dir_bin_added, cube_face_size, faces):
 
     start_time = datetime.now()
-
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_added, exist_ok=True)
 
     # Load recording details
     with open(recording_details_path, 'r') as f:
         metadata = json.load(f)
 
+    # Create a mapping from ImageId to the full record from metadata['RecordingProperties']
+    metadata_records = { record['ImageId']: record for record in metadata['RecordingProperties'] }
+
     image_info = parse_json(recording_details_path)
+    # Assume sort_images_by_time returns a list of tuples: (ImageId, record)
     sorted_images = sort_images_by_time(image_info)  
-    
+
     cameras = {
         1: {
-            'model': 'SIMPLE_PINHOLE',  # Was SIMPLE_PINHOLE
+            'model': 'SIMPLE_PINHOLE',
             'width': cube_face_size,
             'height': cube_face_size,
             'params': compute_intrinsics(cube_face_size),
@@ -254,26 +269,24 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
     images = {}
     image_id = 1
 
+    # Process original images from the recording file.
     for record in metadata['RecordingProperties']:
         x_rd, y_rd = record['X'], record['Y']
         height = record['Height']
         vehicle_direction = record['VehicleDirection']
         yaw = record['Yaw']
 
+        # Use the sorted order to get an index for naming.
+        idx = next(i for i, (img_id, _) in enumerate(sorted_images) if img_id == record["ImageId"])
+        idx_str = str(idx).zfill(4)
+
         for face in faces:
-
-            # Extrinsic parameters
+            # Compute extrinsics
             rotation_matrix = compute_extrinsics(face, vehicle_direction, yaw)
-            position = [x_rd, y_rd, height]  # Camera position (x, y, z)
-
+            position = [x_rd - 136757, y_rd - 455750, height] # xi - 136757, yi - 455750
             translation_vector = calculate_translation(rotation_matrix, position)
 
-            # The images are stored in a folder called inputs. Inside there are 4 folders, one for each face of the cube, they are named cam<cam_n>
-            # f = 1, r = 2, b = 3, l = 4
-            # The images are named as follows: cam<cam_n>/<index>_<ImageId>_<face>.jpg where the index is a number given by the position in the sorted_images list
-            # Find the index of the current image in the sorted_images list
-            idx = next(i for i, (image_id, _) in enumerate(sorted_images) if image_id == record["ImageId"])
-            idx = str(idx).zfill(4)
+            # Get camera number for the current face.
             cam_n = {
                 'f': 1,
                 'r': 2,
@@ -290,31 +303,111 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
                 'u1': 9,
                 'u2': 10
             }[face]
-            image_name = f"cam{cam_n}/{idx}_{record['ImageId']}_{face}.jpg"
+            image_name = f"cam{cam_n}/{idx_str}_{record['ImageId']}_{face}.jpg"
 
-            # Convert rotation matrix to quaternion
             qvec = rotmat2qvec(rotation_matrix)
-
             images[image_id] = {
                 'qvec': qvec,
                 'tvec': translation_vector,
-                'camera_id': 1,  # Single camera ID for all images
+                'camera_id': 1,
                 'name': image_name,
             }
-
             image_id += 1
 
-    # Write COLMAP files
+    # ---------------------------------------------------------------------------
+    # Add intermediate captures if the distance between consecutive captures 
+    # is approximately 5 meters (with a tolerance of ±0.5 m).
+    # ---------------------------------------------------------------------------
+    added_images = images.copy()
+    added_image_id = image_id
+
+    # Iterate over consecutive pairs from the sorted images.
+    # Here we assume each element in sorted_images is (ImageId, record)
+    for i in range(len(sorted_images) - 1):
+        img_id1, _ = sorted_images[i]
+        img_id2, _ = sorted_images[i+1]
+
+        # Retrieve full records with uppercase keys
+        record1 = metadata_records[img_id1]
+        record2 = metadata_records[img_id2]
+
+        # Calculate 2D distance (using X and Y; adjust if you want to include height)
+        dx = record2['X'] - record1['X']
+        dy = record2['Y'] - record1['Y']
+        distance = math.sqrt(dx**2 + dy**2)
+
+        # If the distance is roughly 5 m, add an interpolated capture.
+        if 3 <= distance <= 10:
+            # Interpolate properties between record1 and record2.
+            new_record = {}
+            for field in ['X', 'Y', 'Height', 'VehicleDirection', 'Yaw']:
+                new_record[field] = (record1[field] + record2[field]) / 2
+
+            # Interpolate the recording time if present.
+            time1 = datetime.fromisoformat(record1['RecordingTimeGps'])
+            time2 = datetime.fromisoformat(record2['RecordingTimeGps'])
+            new_time = time1 + (time2 - time1) / 2
+            new_record['RecordingTimeGps'] = new_time.isoformat()
+
+            # Create a new unique ImageId for the added capture.
+            new_record['ImageId'] = f"added_{added_image_id}"
+            idx_added = str(added_image_id).zfill(4)
+
+            # For each face, compute and add the image.
+            for face in faces:
+                rotation_matrix = compute_extrinsics(face, new_record['VehicleDirection'], new_record['Yaw'])
+                position = [new_record['X'] - 136757, new_record['Y'] - 455750, new_record['Height']] # xi - 136757, yi - 455750
+                translation_vector = calculate_translation(rotation_matrix, position)
+
+                cam_n = {
+                    'f': 1,
+                    'r': 2,
+                    'b': 3,
+                    'l': 4,
+                    'f1': 1,
+                    'f2': 2,
+                    'r1': 3,
+                    'r2': 4,
+                    'b1': 5,
+                    'b2': 6,
+                    'l1': 7,
+                    'l2': 8,
+                    'u1': 9,
+                    'u2': 10
+                }[face]
+                image_name = f"cam{cam_n}/{idx_added}_{new_record['ImageId']}_{face}.jpg"
+                qvec = rotmat2qvec(rotation_matrix)
+                added_images[added_image_id] = {
+                    'qvec': qvec,
+                    'tvec': translation_vector,
+                    'camera_id': 1,
+                    'name': image_name,
+                }
+                added_image_id += 1
+
+    # Write COLMAP files for the original captures.
     write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
-    write_images_txt(os.path.join(output_dir, 'images.txt'), images)
+    write_cameras_txt(os.path.join(output_dir_added, 'cameras.txt'), cameras)
+
     write_points3D_txt(os.path.join(output_dir, 'points3D.txt'))
+    write_points3D_txt(os.path.join(output_dir_added, 'points3D.txt'))
+
+    write_images_txt(os.path.join(output_dir, 'images.txt'), images)
+    # Write the added (interpolated) images to a separate file.
+    write_images_txt(os.path.join(output_dir_added, 'images.txt'), added_images)
 
     if not os.path.exists(output_dir_bin):
         os.makedirs(output_dir_bin)
     # Convert COLMAP files to binary format
     convert_txt_to_bin(output_dir, output_dir_bin)
 
-    print(f"Total time taken: {datetime.now() - start_time}")
+    if not os.path.exists(output_dir_bin_added):
+        os.makedirs(output_dir_bin_added)
+    # Convert COLMAP files to binary format
+    convert_txt_to_bin(output_dir_added, output_dir_bin_added)
+
+    end_time = datetime.now()
+    print(f"Processing completed in {end_time - start_time}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -325,7 +418,9 @@ if __name__ == "__main__":
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     recording_details_path = f"{base_path}/ss_raw_images/recording_details.json"
     output_dir = f"{base_path}/colmap_output"
+    output_dir_added = f"{base_path}/colmap_output_added"
     output_dir_bin = f"{base_path}/camera_calibration/unrectified/sparse/0"
+    output_dir_bin_added = f"{base_path}/colmap_output_added_bin"
     cube_face_size = 1536
     choice = 0
     while choice not in ["1", "2", "3"]:
@@ -343,4 +438,4 @@ if __name__ == "__main__":
                 faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
             else:
                 print("Invalid choice. Please try again.")
-    main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces)
+    main(recording_details_path, output_dir, output_dir_bin, output_dir_added, output_dir_bin_added, cube_face_size, faces)

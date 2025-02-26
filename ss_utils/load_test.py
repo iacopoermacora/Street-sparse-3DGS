@@ -4,7 +4,7 @@ import shutil
 # Function to copy the folders
 def copy_folders(source_dir, toCopy):
     if toCopy == 1:
-        folders_to_copy = ["camera_calibration", "output", "inputs", "ss_raw_images", "colmap_output"]
+        folders_to_copy = ["camera_calibration", "output", "inputs", "ss_raw_images"]
     else:
         folders_to_copy = ["output", "camera_calibration"]
 
