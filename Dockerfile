@@ -3,8 +3,15 @@ ARG USER_ID=1576554604
 ARG GROUP_ID=1000
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install required packages including OpenCTM tools
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git wget unzip bzip2 sudo build-essential ca-certificates openssh-server vim ffmpeg libsm6 libxext6 python3-opencv gcc-11 g++-11 cmake
+    apt-get install -y --no-install-recommends \
+        git wget unzip bzip2 sudo build-essential \
+        ca-certificates openssh-server vim ffmpeg \
+        libsm6 libxext6 python3-opencv gcc-11 g++-11 cmake \
+        libboost-dev libpython3-dev pybind11-dev \
+        zlib1g-dev openctm-tools libopenctm-dev
+
 
 # conda
 ENV PATH=/opt/conda/bin:$PATH 
@@ -25,6 +32,9 @@ USER docker
 RUN /opt/conda/bin/python -m ensurepip
 RUN /opt/conda/bin/python -m pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
 RUN /opt/conda/bin/python -m pip install plyfile tqdm joblib exif scikit-learn timm==0.4.5 opencv-python==4.9.0.80 gradio_imageslider gradio==4.29.0 matplotlib pyproj Pillow piexif
+
+# Install additional Python packages
+RUN /opt/conda/bin/python -m pip install laspy lazrs open3d trimesh
 
 # Install COLMAP dependencies
 RUN sudo apt-get install -y --no-install-recommends \
@@ -66,3 +76,5 @@ COPY entrypoint.sh /entrypoint.sh
 
 # Make the entrypoint script executable
 RUN sudo chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

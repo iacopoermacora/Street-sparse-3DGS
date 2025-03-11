@@ -2,13 +2,10 @@ import os
 import shutil
 
 # Function to delete folders
-def delete_folders(removal):
-    if removal == 'n':
-        folders_to_delete = ["camera_calibration", "output", "inputs", "ss_raw_images", "colmap_output"]
-    else:
-        folders_to_delete = ["output", "camera_calibration", "colmap_output"]
+def delete_folders():
+    folders_to_delete = ["output", "camera_calibration", "colmap_output_added_bin"]
 
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
     
     # Ask user for confirmation
     for folder in folders_to_delete:
@@ -29,9 +26,7 @@ def main():
     confirmation = input("Do you want to remove the current test data? Make sure to have saved it before proceeding. (y/n): ").strip().lower()
     
     if confirmation == 'y':
-        # Ask if they want a complete removal or just the outputs
-        removal = input("Do you want to remove the outputs only? (y/n): ").strip().lower()
-        delete_folders(removal)
+        delete_folders()
     else:
         print("No data was removed.")
 

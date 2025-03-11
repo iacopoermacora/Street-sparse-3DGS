@@ -47,6 +47,10 @@ def main():
     vertices = np.array(mesh.vertices, dtype=np.float32)
     faces = np.array(mesh.faces, dtype=np.int32)
     
+    # # Apply translation to the mesh vertices
+    # translation = np.array([136757, 455750, 0], dtype=np.float32)
+    # vertices += translation
+    
     # Group faces by grid cell (based on x and y coordinates of face centroids).
     cell_faces = defaultdict(list)
     for face in tqdm(faces):

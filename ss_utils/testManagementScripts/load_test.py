@@ -2,13 +2,15 @@ import os
 import shutil
 
 # Function to copy the folders
-def copy_folders(source_dir, toCopy):
-    if toCopy == 1:
-        folders_to_copy = ["camera_calibration", "output", "inputs", "ss_raw_images"]
-    else:
-        folders_to_copy = ["output", "camera_calibration"]
+def copy_folders(source_dir):
+    
+    folders_to_copy = ["camera_calibration", "output", "colmap_output_added_bin"]
 
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+    if not os.path.exists(os.path.join(base_path, "ss_raw_images")) or not os.path.exists(os.path.join(base_path, "inputs")):
+        print("Error: the 'ss_raw_images' and 'inputs' folders do not exist in the current directory. Please make sure to have the correct folder structure before importing data.")
+        return
 
     # Check if the folders already exist in the current directory
     for folder in folders_to_copy:
@@ -43,20 +45,48 @@ def main():
     storage_path = "/media/raid_1/iermacora/Street-sparse-3DGS_outputs/"
 
     # List the available folders in the storage path
-    available_folders = list_folders(storage_path)
+    available_datasets = list_folders(storage_path)
 
-    if not available_folders:
+    if not available_datasets:
         print("There are no folder available, exiting script...")
         return  # No folders available, exit the script
 
     # Display the available folders and prompt user to select one
-    print(f"Available folders in {storage_path}:")
-    for idx, folder in enumerate(available_folders, 1):
+    print(f"Available datasets in {storage_path}:")
+    for idx, folder in enumerate(available_datasets, 1):
         print(f"{idx}. {folder}")
     
     # Get user selection
     try:
-        selection = int(input(f"Select a folder number (1-{len(available_folders)}): "))
+        selection = int(input(f"Select a dataset number (1-{len(available_datasets)}): "))
+        if selection < 1 or selection > len(available_datasets):
+            print("Invalid selection. Please choose a valid number.")
+            return
+        selected_dataset = available_datasets[selection - 1]
+    except ValueError:
+        print("Invalid input. Please enter a valid number.")
+        return
+    
+    # Validate the provided path
+    if not os.path.exists(os.path.join(storage_path, selected_dataset)):
+        print(f"The directory '{os.path.join(storage_path, selected_dataset)}' does not exist. Please check the path and try again.")
+        return
+    else:
+        # List the available folders in the storage path
+        available_folders = list_folders(os.path.join(storage_path, selected_dataset))
+
+        if not available_folders:
+            print("There are no tests available for this dataset, exiting script...")
+            return  # No folders available, exit the script
+
+        # Display the available folders and prompt user to select one
+        print(f"Available tests in {selected_dataset}:")
+        for idx, folder in enumerate(available_folders, 1):
+            print(f"{idx}. {folder}")
+        
+        # Get user selection
+    try:
+        selection = int(input(f"Select a test number (1-{len(available_folders)}): "))
         if selection < 1 or selection > len(available_folders):
             print("Invalid selection. Please choose a valid number.")
             return
@@ -65,28 +95,7 @@ def main():
         print("Invalid input. Please enter a valid number.")
         return
     
-    # Validate the provided path
-    if not os.path.exists(os.path.join(storage_path, selected_folder)):
-        print(f"The directory '{os.path.join(storage_path, selected_folder)}' does not exist. Please check the path and try again.")
-        return
-    
-    # Prompt the user to select the folders to copy
-    print("The following folders are available to copy:")
-    print("1. camera_calibration, Output, Inputs, ss_raw_images")
-    print("2. Output, camera_calibration")
-
-    # Get user selection
-    try:
-        selection2 = int(input(f"Select option 1 or 2: "))
-        if selection2 < 1 or selection2 > 2:
-            print("Invalid selection. Please choose a valid number.")
-            return
-        toCopy = selection2
-        # Proceed to copy the folders
-        copy_folders(os.path.join(storage_path, selected_folder), toCopy)
-    except ValueError:
-        print("Invalid input. Please enter a valid number.")
-        return
+    copy_folders(os.path.join(os.path.join(storage_path, selected_dataset), selected_folder))
 
 # Run the script
 if __name__ == "__main__":

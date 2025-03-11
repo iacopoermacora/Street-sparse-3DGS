@@ -11,5 +11,11 @@ inputs
 camera_calibration
 ss_raw_images
 ss_utils/static
-colmap_output_added_bin/
+colmap_output_added_bin
+ss_utils/ctm_exporter.cpython*
+ss_utils/testMeshesOld
+ss_utils/testMeshes
+ss_utils/test_ctm
+ss_utils/dist
+ss_utils/build
 
