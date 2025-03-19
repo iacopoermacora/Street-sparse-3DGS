@@ -34,7 +34,7 @@ ctm_exporter = Extension(
     "ctm_exporter",
     sources=["ctm_exporter.cpp"],
     include_dirs=[pybind11.get_include()],
-    libraries=["ctm"],
+    libraries=["openctm"],
     extra_compile_args=["-std=c++11"]
 )
 

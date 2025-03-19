@@ -157,6 +157,7 @@ if __name__ == '__main__':
         print(f"chunking colmap from {colmap_dir} to {args.chunks_dir}/raw_chunks")
         ss_make_chunk_args = [
                 "python", f"preprocess/ss_make_chunk.py",
+                "--project_dir", args.project_dir,
                 "--base_dir", os.path.join(colmap_dir, "sparse", "0"),
                 "--images_dir", f"{images_dir}",
                 "--output_path", f"{chunks_dir}/chunks",

@@ -12,6 +12,8 @@ RUN apt-get update && \
         libboost-dev libpython3-dev pybind11-dev \
         zlib1g-dev openctm-tools libopenctm-dev
 
+# Install Docker CLI only (not Docker Engine)
+RUN apt-get install -y --no-install-recommends docker.io
 
 # conda
 ENV PATH=/opt/conda/bin:$PATH 
@@ -25,6 +27,11 @@ RUN wget --quiet \
 RUN addgroup --gid $GROUP_ID user
 RUN useradd -l --create-home -s /bin/bash --uid $USER_ID --gid $GROUP_ID docker
 RUN adduser docker sudo
+
+# Add user to the docker group (so it can run docker commands)
+RUN usermod -aG docker docker
+
+
 RUN echo "docker ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 USER docker
 

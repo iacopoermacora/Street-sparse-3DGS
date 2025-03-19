@@ -18,4 +18,7 @@ ss_utils/testMeshes
 ss_utils/test_ctm
 ss_utils/dist
 ss_utils/build
+ss_utils/ctm_exporter.egg-info
+vis2mesh/example
+vis2mesh/checkpoints/*.pth
 

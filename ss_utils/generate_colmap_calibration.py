@@ -7,11 +7,11 @@ from datetime import datetime
 import argparse
 from tqdm import tqdm
 import math
+import subprocess
+from read_write_model import rotmat2qvec
 
 def parse_json(json_file):
-
     print("Reading recording details...")
-
     with open(json_file, 'r') as f:
         data = json.load(f)
 
@@ -26,12 +26,10 @@ def parse_json(json_file):
             'y': record['X'],
         }
     
-    return image_info
+    return image_info, data
 
 def sort_images_by_time(image_info):
-
     print("Sorting images...")
-
     sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
     return sorted_images
 
@@ -56,19 +54,7 @@ def write_images_txt(filename, images):
             tvec_str = ' '.join(map(str, params['tvec']))
             f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
 
-def write_added_images_txt(filename, images):
-    with open(filename, 'w') as f:
-        f.write('# Image list with one line of data per image:\n')
-        f.write('#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, IMAGE_NAME, \n')
-        f.write('#   POINTS2D[] as (X, Y, POINT3D_ID)\n')
-        f.write('# Number of images: {}\n'.format(len(images)))
-        for image_id, params in images.items():
-            qvec_str = ' '.join(map(str, params['qvec']))
-            tvec_str = ' '.join(map(str, params['tvec']))
-            f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
-
 def write_points3D_txt(output_filename):
-    
     # Write directly to COLMAP format during single pass
     with open(output_filename, 'w') as f:
         f.write('# 3D point list with one line of data per point:\n')
@@ -135,58 +121,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     R = np.dot(R_x, R_z)
     return R
 
-
-def rotmat2qvec(R):
-    Rxx, Ryx, Rzx, Rxy, Ryy, Rzy, Rxz, Ryz, Rzz = R.flat
-    K = (
-        np.array(
-            [
-                [Rxx - Ryy - Rzz, 0, 0, 0],
-                [Ryx + Rxy, Ryy - Rxx - Rzz, 0, 0],
-                [Rzx + Rxz, Rzy + Ryz, Rzz - Rxx - Ryy, 0],
-                [Ryz - Rzy, Rzx - Rxz, Rxy - Ryx, Rxx + Ryy + Rzz],
-            ]
-        )
-        / 3.0
-    )
-    eigvals, eigvecs = np.linalg.eigh(K)
-    qvec = eigvecs[[3, 0, 1, 2], np.argmax(eigvals)]
-    if qvec[0] < 0:
-        qvec *= -1
-    return qvec
-
-
-def rotation_matrix_to_quaternion(R): # DEPRECATED
-    q = np.zeros(4)
-    trace = np.trace(R)
-    if trace > 0:
-        s = 0.5 / np.sqrt(trace + 1.0)
-        q[0] = 0.25 / s
-        q[1] = (R[2, 1] - R[1, 2]) * s
-        q[2] = (R[0, 2] - R[2, 0]) * s
-        q[3] = (R[1, 0] - R[0, 1]) * s
-    else:
-        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
-            s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
-            q[0] = (R[2, 1] - R[1, 2]) / s
-            q[1] = 0.25 * s
-            q[2] = (R[0, 1] + R[1, 0]) / s
-            q[3] = (R[0, 2] + R[2, 0]) / s
-        elif R[1, 1] > R[2, 2]:
-            s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
-            q[0] = (R[0, 2] - R[2, 0]) / s
-            q[1] = (R[0, 1] + R[1, 0]) / s
-            q[2] = 0.25 * s
-            q[3] = (R[1, 2] + R[2, 1]) / s
-        else:
-            s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
-            q[0] = (R[1, 0] - R[0, 1]) / s
-            q[1] = (R[0, 2] + R[2, 0]) / s
-            q[2] = (R[1, 2] + R[2, 1]) / s
-            q[3] = 0.25 * s
-
-    return q
-
 def calculate_translation(rotation_matrix, position):
     """
     Calculate the translation vector given a rotation matrix and position.
@@ -198,7 +132,6 @@ def calculate_translation(rotation_matrix, position):
     Returns:
         numpy.ndarray: The translation vector (3x1).
     """
-    # str(float(parts[5]) + 136500), str(float(parts[6]) + 455700)
     position[0] = float(position[0])
     position[1] = float(position[1])
     # Ensure the position is a column vector
@@ -208,8 +141,6 @@ def calculate_translation(rotation_matrix, position):
     translation = -np.dot(rotation_matrix, position)
     
     return translation.flatten()
-
-import subprocess
 
 def convert_txt_to_bin(input_path, output_path):
     """
@@ -240,22 +171,55 @@ def convert_txt_to_bin(input_path, output_path):
     except FileNotFoundError:
         raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
 
-def main(recording_details_path, output_dir, output_dir_bin, output_dir_added, output_dir_bin_added, cube_face_size, faces):
+def compute_centering_translation(metadata):
+    """
+    Compute translation values to center the model at (0,0) for x and y.
+    
+    Args:
+        metadata (dict): The metadata containing RecordingProperties.
+        
+    Returns:
+        tuple: (x_translation, y_translation) values to center the model.
+    """
+    # Extract all X and Y coordinates
+    x_coords = [record['X'] for record in metadata['RecordingProperties']]
+    y_coords = [record['Y'] for record in metadata['RecordingProperties']]
+    
+    # Calculate the center of the model
+    x_center = sum(x_coords) / len(x_coords)
+    y_center = sum(y_coords) / len(y_coords)
+    
+    return x_center, y_center
+
+def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces):
+    import subprocess
 
     start_time = datetime.now()
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(output_dir_added, exist_ok=True)
+    os.makedirs(os.path.dirname(output_dir_bin), exist_ok=True)
 
     # Load recording details
-    with open(recording_details_path, 'r') as f:
-        metadata = json.load(f)
-
-    # Create a mapping from ImageId to the full record from metadata['RecordingProperties']
-    metadata_records = { record['ImageId']: record for record in metadata['RecordingProperties'] }
-
-    image_info = parse_json(recording_details_path)
-    # Assume sort_images_by_time returns a list of tuples: (ImageId, record)
-    sorted_images = sort_images_by_time(image_info)  
+    image_info, metadata = parse_json(recording_details_path)
+    
+    # Compute the translation values to center the model at (0,0)
+    x_center, y_center = compute_centering_translation(metadata)
+    
+    # Save the translation values to translation.json
+    translation_json = {
+        "x_translation": float(x_center),
+        "y_translation": float(y_center)
+    }
+    
+    with open(os.path.join(args.project_dir, 'camera_calibration/translation.json'), 'w') as f:
+        json.dump(translation_json, f, indent=4)
+    
+    print(f"Translation values saved to {os.path.join(args.project_dir, 'camera_calibration/translation.json')}")
+    
+    # Mapping from ImageId to the full record
+    metadata_records = {record['ImageId']: record for record in metadata['RecordingProperties']}
+    
+    # Sort images by time
+    sorted_images = sort_images_by_time(image_info)
 
     cameras = {
         1: {
@@ -283,7 +247,8 @@ def main(recording_details_path, output_dir, output_dir_bin, output_dir_added, o
         for face in faces:
             # Compute extrinsics
             rotation_matrix = compute_extrinsics(face, vehicle_direction, yaw)
-            position = [x_rd - 136757, y_rd - 455750, height] # xi - 136757, yi - 455750
+            # Apply the calculated translation to center the model
+            position = [x_rd - x_center, y_rd - y_center, height]
             translation_vector = calculate_translation(rotation_matrix, position)
 
             # Get camera number for the current face.
@@ -314,97 +279,18 @@ def main(recording_details_path, output_dir, output_dir_bin, output_dir_added, o
             }
             image_id += 1
 
-    # ---------------------------------------------------------------------------
-    # Add intermediate captures if the distance between consecutive captures 
-    # is approximately 5 meters (with a tolerance of ±0.5 m).
-    # ---------------------------------------------------------------------------
-    added_images = images.copy()
-    added_image_id = image_id
-
-    # Iterate over consecutive pairs from the sorted images.
-    # Here we assume each element in sorted_images is (ImageId, record)
-    for i in range(len(sorted_images) - 1):
-        img_id1, _ = sorted_images[i]
-        img_id2, _ = sorted_images[i+1]
-
-        # Retrieve full records with uppercase keys
-        record1 = metadata_records[img_id1]
-        record2 = metadata_records[img_id2]
-
-        # Calculate 2D distance (using X and Y; adjust if you want to include height)
-        dx = record2['X'] - record1['X']
-        dy = record2['Y'] - record1['Y']
-        distance = math.sqrt(dx**2 + dy**2)
-
-        # If the distance is roughly 5 m, add an interpolated capture.
-        if 3 <= distance <= 10:
-            # Interpolate properties between record1 and record2.
-            new_record = {}
-            for field in ['X', 'Y', 'Height', 'VehicleDirection', 'Yaw']:
-                new_record[field] = (record1[field] + record2[field]) / 2
-
-            # Interpolate the recording time if present.
-            time1 = datetime.fromisoformat(record1['RecordingTimeGps'])
-            time2 = datetime.fromisoformat(record2['RecordingTimeGps'])
-            new_time = time1 + (time2 - time1) / 2
-            new_record['RecordingTimeGps'] = new_time.isoformat()
-
-            # Create a new unique ImageId for the added capture.
-            new_record['ImageId'] = f"added_{added_image_id}"
-            idx_added = str(added_image_id).zfill(4)
-
-            # For each face, compute and add the image.
-            for face in faces:
-                rotation_matrix = compute_extrinsics(face, new_record['VehicleDirection'], new_record['Yaw'])
-                position = [new_record['X'] - 136757, new_record['Y'] - 455750, new_record['Height']] # xi - 136757, yi - 455750
-                translation_vector = calculate_translation(rotation_matrix, position)
-
-                cam_n = {
-                    'f': 1,
-                    'r': 2,
-                    'b': 3,
-                    'l': 4,
-                    'f1': 1,
-                    'f2': 2,
-                    'r1': 3,
-                    'r2': 4,
-                    'b1': 5,
-                    'b2': 6,
-                    'l1': 7,
-                    'l2': 8,
-                    'u1': 9,
-                    'u2': 10
-                }[face]
-                image_name = f"cam{cam_n}/{idx_added}_{new_record['ImageId']}_{face}.jpg"
-                qvec = rotmat2qvec(rotation_matrix)
-                added_images[added_image_id] = {
-                    'qvec': qvec,
-                    'tvec': translation_vector,
-                    'camera_id': 1,
-                    'name': image_name,
-                }
-                added_image_id += 1
-
     # Write COLMAP files for the original captures.
     write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
-    write_cameras_txt(os.path.join(output_dir_added, 'cameras.txt'), cameras)
-
     write_points3D_txt(os.path.join(output_dir, 'points3D.txt'))
-    write_points3D_txt(os.path.join(output_dir_added, 'points3D.txt'))
-
     write_images_txt(os.path.join(output_dir, 'images.txt'), images)
-    # Write the added (interpolated) images to a separate file.
-    write_images_txt(os.path.join(output_dir_added, 'images.txt'), added_images)
 
-    if not os.path.exists(output_dir_bin):
-        os.makedirs(output_dir_bin)
+    # Create the directory structure for the binary output
+    os.makedirs(os.path.dirname(output_dir_bin), exist_ok=True)
+    if not os.path.exists(os.path.dirname(output_dir_bin)):
+        os.makedirs(os.path.dirname(output_dir_bin))
+    
     # Convert COLMAP files to binary format
     convert_txt_to_bin(output_dir, output_dir_bin)
-
-    if not os.path.exists(output_dir_bin_added):
-        os.makedirs(output_dir_bin_added)
-    # Convert COLMAP files to binary format
-    convert_txt_to_bin(output_dir_added, output_dir_bin_added)
 
     end_time = datetime.now()
     print(f"Processing completed in {end_time - start_time}")
@@ -412,15 +298,13 @@ def main(recording_details_path, output_dir, output_dir_bin, output_dir_added, o
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--calibration', type=str, default="sfm",  help="Preprocessing workflow to execute. Options: sfm, cal_sfm, cal")
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
 
     args = parser.parse_args()
     # Example usage
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    recording_details_path = f"{base_path}/ss_raw_images/recording_details.json"
-    output_dir = f"{base_path}/colmap_output"
-    output_dir_added = f"{base_path}/colmap_output_added"
-    output_dir_bin = f"{base_path}/camera_calibration/unrectified/sparse/0"
-    output_dir_bin_added = f"{base_path}/colmap_output_added_bin"
+    recording_details_path = f"{args.project_dir}/ss_raw_images/recording_details.json"
+    output_dir = f"{args.project_dir}/colmap_output"
+    output_dir_bin = f"{args.project_dir}/camera_calibration/unrectified/sparse/0/"
     cube_face_size = 1536
     choice = 0
     while choice not in ["1", "2", "3"]:
@@ -438,4 +322,4 @@ if __name__ == "__main__":
                 faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
             else:
                 print("Invalid choice. Please try again.")
-    main(recording_details_path, output_dir, output_dir_bin, output_dir_added, output_dir_bin_added, cube_face_size, faces)
+    main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces)
