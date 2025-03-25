@@ -19,6 +19,10 @@ ss_utils/test_ctm
 ss_utils/dist
 ss_utils/build
 ss_utils/ctm_exporter.egg-info
+ss_utils/ctm_output
 vis2mesh/example
 vis2mesh/checkpoints/*.pth
+output_old/
+SIBR_SERVER/
+camera_calibration_old/
 

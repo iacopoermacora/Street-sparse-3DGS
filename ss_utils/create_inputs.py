@@ -127,7 +127,7 @@ if __name__ == "__main__":
     base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     raw_input = f"{base_path}/ss_raw_images"
     raw_image_input = f"{raw_input}/images/level_2/color"
-    json_file = os.path.join(raw_input, "recording_details.json")
+    json_file = os.path.join(raw_input, "recording_details_train_test.json")
     image_info = parse_json(json_file)
     sorted_images = sort_images_by_time(image_info)
     choice = 0

@@ -184,7 +184,7 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
             continue
         combined_pcd += pcd
     
-    downsampled_pcd = downsample_for_max_density(combined_pcd, max_density=1000)
+    downsampled_pcd = downsample_for_max_density(combined_pcd, max_density=500)
 
     # Extract points and colors
     if len(downsampled_pcd.points) == 0:
@@ -371,6 +371,9 @@ if __name__ == '__main__':
     test_file = f"{args.base_dir}/test.txt"
     if os.path.exists(test_file):
         with open(test_file, 'r') as file:
+            print("!"*100)
+            print("Reading test file")
+            print("!"*100)
             test_cam_names_list = file.readlines()
             blending_dict = {name[:-1] if name[-1] == '\n' else name: {} for name in test_cam_names_list}
 
@@ -450,6 +453,7 @@ if __name__ == '__main__':
 
     if not os.path.exists(os.path.dirname(total_ply)):
         os.makedirs(os.path.dirname(total_ply))
+        os.chmod(os.path.dirname(total_ply), 0o777)
         
     o3d.io.write_point_cloud(total_ply, total_pcd)
 

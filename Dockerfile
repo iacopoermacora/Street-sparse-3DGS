@@ -10,7 +10,8 @@ RUN apt-get update && \
         ca-certificates openssh-server vim ffmpeg \
         libsm6 libxext6 python3-opencv gcc-11 g++-11 cmake \
         libboost-dev libpython3-dev pybind11-dev \
-        zlib1g-dev openctm-tools libopenctm-dev
+        zlib1g-dev openctm-tools libopenctm-dev \
+        xauth x11-apps
 
 # Install Docker CLI only (not Docker Engine)
 RUN apt-get install -y --no-install-recommends docker.io
