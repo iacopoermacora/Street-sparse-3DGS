@@ -23,10 +23,34 @@ if __name__ == "__main__":
     
     total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
 
+    # Call the script to augment the recording details
+
+    print("#"*30)
+    print("Step 1/7: Augmenting the recording details")
+    print("#"*30)
+
+    # Get the time before the script starts
+    start_time = time.time()
+
+    # If the augmented recording details file already exists, skip this step
+    if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images", "recording_details_augmented.json")):
+        augment_recording_details = [
+                    "python", f"ss_utils/augment_recording_details.py",
+                    "--project_dir", args.project_dir,
+                    "--directions", args.directions
+                ]
+        try:
+            subprocess.run(augment_recording_details, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing augment_recording_details: {e}")
+            sys.exit(1)
+        
+        print(f"Time taken to augment the recording details: {time.time() - start_time} seconds")
+
     # Call the colmap_to_vis2mesh.py script to convert the COLMAP model to a custom JSON format
 
     print("#"*30)
-    print("Step 1/7: Converting the COLMAP model to a custom JSON format for vis2mesh")
+    print("Step 2/7: Converting the COLMAP model to a custom JSON format for vis2mesh")
     print("#"*30)
 
     # Get the time before the script starts
@@ -52,7 +76,7 @@ if __name__ == "__main__":
     # Call the docker container vis2mesh to generate the mesh
 
     print("#"*30)
-    print("Step 2/7: Generating the mesh using vis2mesh")
+    print("Step 3/7: Generating the mesh using vis2mesh")
     print("#"*30)
 
     # Get the time before the script starts
@@ -115,7 +139,7 @@ if __name__ == "__main__":
     # Call the script to convert the mesh to the .ctm format
 
     print("#"*30)
-    print("Step 3/7: Converting the mesh to the .ctm format")
+    print("Step 4/7: Converting the mesh to the .ctm format")
     print("#"*30)
 
     # Get the time before the script starts
@@ -138,30 +162,6 @@ if __name__ == "__main__":
         print(f"Time taken to convert the mesh to the .ctm format: {time.time() - start_time} seconds")
     else:
         print("The ctm folder already exists. Skipping this step")
-
-    # Call the script to augment the recording details
-
-    print("#"*30)
-    print("Step 4/7: Augmenting the recording details")
-    print("#"*30)
-
-    # Get the time before the script starts
-    start_time = time.time()
-
-    # If the augmented recording details file already exists, skip this step
-    if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images", "recording_details_augmented.json")):
-        augment_recording_details = [
-                    "python", f"ss_utils/augment_recording_details.py",
-                    "--project_dir", args.project_dir,
-                    "--directions", args.directions
-                ]
-        try:
-            subprocess.run(augment_recording_details, check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error executing augment_recording_details: {e}")
-            sys.exit(1)
-        
-        print(f"Time taken to augment the recording details: {time.time() - start_time} seconds")
 
     # Call the script to convert the recording_details file to the .stations format
     print("#"*30)

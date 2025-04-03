@@ -1,6 +1,7 @@
 import os
 import shutil
 import datetime
+import argparse
 
 # Function to prompt user for input
 def get_user_input():
@@ -19,18 +20,15 @@ def copy_folders(location_name, description, storage_path):
     new_folder = os.path.join(storage_path, new_folder_name)
     
     # Define the list of folders to copy
-    folders_to_copy = ["camera_calibration", "output", "colmap_output_added_bin"]
+    folders_to_copy = ["output"]
     
     # Create the new directory
     if not os.path.exists(new_folder):
         os.makedirs(new_folder)
 
-    # Get current project root
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
     # Copy each folder to the new directory
     for folder in folders_to_copy:
-        source_folder = os.path.join(base_path, folder)
+        source_folder = os.path.join(args.project_dir, folder)
         destination_folder = os.path.join(new_folder, folder)
         if os.path.exists(source_folder):
             print(f"Copying folder {folder} to {new_folder}, this might take a while...")
@@ -94,4 +92,7 @@ def main():
 
 # Run the script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
     main()

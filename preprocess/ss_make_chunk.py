@@ -9,6 +9,8 @@
 # For inquiries contact  george.drettakis@inria.fr
 #
 
+# SS_MAKE_CHUNK
+
 import numpy as np
 import argparse
 import cv2
@@ -152,12 +154,7 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
         return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
     
     # Filter the laz files to only include the ones that are in the chunk bounding box based on the center.txt and extent.txt files. 
-    # The laz files are named as filtered_x_y.laz where x and y are the coordinates of the bottom left (smallest x, y coordinates) of the laz file, divided by 50. 
-    # Consider that laz files and chunks do not correspond exactly to each other. One chunk might be composed of multiple laz files and one laz file might be used in multiple chunks.
-    # Read the center.txt and extent.txt files to get the bounding box of the chunk and add the translation values to the x and y coordinates
-    # Open tranlation.json file to get the translation values
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    with open(f"{base_path}/camera_calibration/translation.json", 'r') as f:
+    with open(f"{args.project_dir}/camera_calibration/translation.json", 'r') as f:
         translation = json.load(f)
     # Compute the tranlated position of the center of the chunk
     center_original = [0, 0]
@@ -184,20 +181,24 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
             continue
         combined_pcd += pcd
     
-    downsampled_pcd = downsample_for_max_density(combined_pcd, max_density=500)
+    if args.LiDAR_initialisation:
+        downsampled_pcd = downsample_for_max_density(combined_pcd, max_density=args.LiDAR_downsample_density)
 
-    # Extract points and colors
-    if len(downsampled_pcd.points) == 0:
-        print("No points found in the LiDAR files")
-        return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
-    
-    points = np.asarray(downsampled_pcd.points, dtype=np.float32)
-    if downsampled_pcd.has_colors():
-        colors = (np.asarray(downsampled_pcd.colors) * 255).astype(np.uint8)
+        # Extract points and colors
+        if len(downsampled_pcd.points) == 0:
+            print("No points found in the LiDAR files")
+            return np.zeros((0, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.uint8)
+        
+        points = np.asarray(downsampled_pcd.points, dtype=np.float32)
+        if downsampled_pcd.has_colors():
+            colors = (np.asarray(downsampled_pcd.colors) * 255).astype(np.uint8)
+        else:
+            colors = np.zeros((len(points), 3), dtype=np.uint8)
+        
+        print(f"Total points after downsampling: {len(points)}")
     else:
-        colors = np.zeros((len(points), 3), dtype=np.uint8)
-    
-    print(f"Total points after downsampling: {len(points)}")
+        points = None
+        colors = None
     
     # Save the non downsampled points as ply file
     ply_path = f"{chunk_path}/chunk.ply"
@@ -322,12 +323,17 @@ def make_chunk(i, j, n_width, n_height):
         with open(os.path.join(out_path, "extent.txt"), 'w') as f:
             f.write(' '.join(map(str, extent)))
 
+        # PACOMMENT: TODO: Insert here an option to have or not the LiDAR initialisation
+
         print(f"Filtering the points for chunk {i}_{j}")
         # Filter LiDAR points for the chunk
         print("Reading LiDAR points")
-        base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        LiDAR_path = f"{base_path}/ss_raw_images/LiDAR"
+        LiDAR_path = f"{args.project_dir}/ss_raw_images/LiDAR"
         chunk_xyzs, chunk_colors, combined_pcd = process_lidar_points(LiDAR_path, center, extent, out_path)
+
+        if chunk_xyzs is None:
+            chunk_xyzs = new_xyzs
+            chunk_colors = new_colors
 
         # Generate new unique IDs for points
         new_indices = np.arange(len(chunk_xyzs))
@@ -365,15 +371,15 @@ if __name__ == '__main__':
     parser.add_argument('--add_far_cams', default=True)
     parser.add_argument('--model_type', default="bin")
 
+    parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
+    parser.add_argument('--LiDAR_downsample_density', type=int, default=500, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
+
     args = parser.parse_args()
 
     # eval
     test_file = f"{args.base_dir}/test.txt"
     if os.path.exists(test_file):
         with open(test_file, 'r') as file:
-            print("!"*100)
-            print("Reading test file")
-            print("!"*100)
             test_cam_names_list = file.readlines()
             blending_dict = {name[:-1] if name[-1] == '\n' else name: {} for name in test_cam_names_list}
 

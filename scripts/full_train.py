@@ -57,6 +57,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_slurm', action="store_true", default=False)
     parser.add_argument('--skip_if_exists', action="store_true", default=False, help="Skip training a chunk if it already has a hierarchy")
     parser.add_argument('--keep_running', action="store_true", default=False, help="Keep running even if a chunk processing fails")
+
+    parser.add_argument("--additional_depth_maps", action="store_true", default=False) # PACOMMENT: Added this line
+    parser.add_argument("--gt_point_cloud_constraints", action="store_true", default=False) # PACOMMENT: Added this line
+    
     args = parser.parse_args()
     print(args.extra_training_args)
 
@@ -128,6 +132,8 @@ if __name__ == '__main__':
         "--save_iterations -1",
         f"-i {images_dir}", f"-d {depths_dir}",
         f"--scaffold_file {output_dir}/scaffold/point_cloud/iteration_30000",
+        "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
+        "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
         "--skybox_locked" 
     ])
     if masks_dir != "":

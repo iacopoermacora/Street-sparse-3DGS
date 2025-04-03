@@ -1,5 +1,6 @@
 import os
 import shutil
+import argparse
 
 # Function to list available folders in the storage path
 def list_folders(storage_path):
@@ -18,11 +19,9 @@ def copy_folders(source_dir):
     
     folders_to_copy = ["ss_raw_images", "inputs"]
 
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
     # Check if the folders already exist in the current directory
     for folder in folders_to_copy:
-        if os.path.exists(os.path.join(base_path, folder)):
+        if os.path.exists(os.path.join(args.project_dir, folder)):
             # Throw an error if the folder already exists
             raise Exception(f"Folder '{folder}' already exists in the current directory, please clean the directory before moving in new data...")
         # Check if the source folder exists
@@ -32,7 +31,7 @@ def copy_folders(source_dir):
     for folder in folders_to_copy:
         print(f"Copying folder '{folder}' from {source_dir} to the current directory.")
         # Copy the folder to the current directory
-        shutil.copytree(os.path.join(source_dir, folder), os.path.join(base_path, folder))
+        shutil.copytree(os.path.join(source_dir, folder), os.path.join(args.project_dir, folder))
         print(f"Copied folder '{folder}' from {source_dir} to the current directory.")
     
 # Main function to run the script
@@ -72,4 +71,7 @@ def main():
 
 # Run the script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
     main()

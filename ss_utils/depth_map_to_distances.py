@@ -87,6 +87,7 @@ def read_colmap_data(images_bin_path, images_depths_bin_path=None):
         # Use read_model to read the data
         if os.path.exists(images_bin_path):
             images = read_images_binary(images_bin_path)
+            print(f"Read {len(images)} images from images.bin")
             
             # Convert to our format
             for image_id, image in images.items():
@@ -98,6 +99,7 @@ def read_colmap_data(images_bin_path, images_depths_bin_path=None):
         # Add depths data if provided
         if images_depths_bin_path and os.path.exists(images_depths_bin_path):
             depths_images = read_images_binary(images_depths_bin_path)
+            print(f"Read {len(depths_images)} images from images_depths.bin")
                 
             for image_id_depths, image_depths in depths_images.items():
                 images_data[image_id_depths+image_id+1] = {
@@ -142,6 +144,7 @@ def create_mapping_from_colmap(images_bin_path, images_depths_bin_path=None):
         
         for image_id, data in colmap_images.items():
             colmap_name = data['name']
+            print(f"Processing COLMAP name: {colmap_name}")
             
             # Extract pattern from COLMAP name: camX/increasingNumber_imageID_lowercaseFaceLetterFaceNumber.jpg
             # Handle the possibility of multi-digit face numbers (e.g., b10)

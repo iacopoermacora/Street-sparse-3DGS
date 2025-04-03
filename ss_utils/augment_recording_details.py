@@ -15,8 +15,8 @@ def calculate_distance(x1, y1, x2, y2):
     """Calculate the Euclidean distance between two points."""
     return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-def generate_unique_image_id(existing_ids):
-    """Generate a random 8-character alphanumeric ImageId that doesn't exist in existing_ids."""
+def generate_unique_image_name(all_image_names):
+    """Generate a random 8-character alphanumeric ImageId that doesn't exist in all_image_names."""
     while True:
         # Generate a string with pattern: 2 letters + 4 digits + 2 letters
         new_id = ''.join([
@@ -27,7 +27,7 @@ def generate_unique_image_id(existing_ids):
             random.choice(string.ascii_uppercase) for _ in range(2)
         ])
         
-        if new_id not in existing_ids:
+        if new_id not in all_image_names:
             return new_id
 
 def read_colmap_model(colmap_path):
@@ -175,7 +175,7 @@ def calculate_translation(rotation_matrix, position):
     
     return translation.flatten()
 
-def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, image_name_to_id_map, center, extent, translation, faces):
+def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_name_to_id_map, len_all_augmented_images, center, extent, translation, faces):
     """
     Process the recordings and insert new ones based on the criteria.
     Filter recordings to include only those present in COLMAP for this chunk
@@ -184,16 +184,16 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
     """
     recordings = json_data["RecordingProperties"]
     # Filter recordings to include only those present in COLMAP for this chunk
-    filtered_recordings = [rec for rec in recordings if rec["ImageId"] in chunk_colmap_image_ids]
+    filtered_recordings = [rec for rec in recordings if rec["ImageId"] in chunk_image_names]
     
     print(f"Filtered {len(filtered_recordings)} recordings out of {len(recordings)} total for this chunk")
     
     # Sort recordings by timestamp
     filtered_recordings.sort(key=lambda x: datetime.fromisoformat(x["RecordingTimeGps"].replace('Z', '+00:00')))
     
-    # Use all existing image IDs for uniqueness check
-    existing_ids = {rec["ImageId"] for rec in recordings}
-    existing_ids.update(all_image_names)
+    # # Use all existing image IDs for uniqueness check TODO: Check if this is necessary otherwise remove
+    # existing_ids = {rec["ImageId"] for rec in recordings}
+    # existing_ids.update(all_image_names)
     
     new_recordings = []
     augmented_colmap_images = {}
@@ -205,6 +205,9 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
     colmap_position_number = 0
     # Get highest number in the map
     colmap_station_number = max(image_name_to_id_map.values(), default=0) + 1
+
+    skipped_out_of_bounds = 0
+    skipped_distance = 0
     
     for i in range(len(filtered_recordings) - 1):
         current = filtered_recordings[i]
@@ -216,14 +219,13 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
         # Check if they meet our criteria for inserting a new recording
         if distance < 10:
             # Generate a new unique ImageId
-            new_image_id = generate_unique_image_id(existing_ids)
-            existing_ids.add(new_image_id)
+            new_image_name = generate_unique_image_name(all_image_names)
             
             # Create a new recording with averaged values
             new_recording = {}
             for key in current.keys():
                 if key == "ImageId":
-                    new_recording[key] = new_image_id
+                    new_recording[key] = new_image_name
                 elif key == "ImageFolder":
                     # Keep the same image folder
                     new_recording[key] = current[key]
@@ -258,8 +260,9 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
             point_z = new_recording["Height"]  # Use Height as Z
             
             if is_point_in_chunk(point_x, point_y, point_z, center_x, center_y, center_z, extent_x, extent_y, extent_z):
-                # Add the new recording
+                # Add the new recording and image_id to the collections
                 new_recordings.append(new_recording)
+                all_image_names.add(new_image_name)
                 
                 # Prepare COLMAP data for this augmented image
                 # We'll create entries for each face
@@ -276,20 +279,20 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
                     }[face]
                     
                     # Create a unique index for this augmented image if it does not already have an assigned number
-                    if new_image_id not in image_name_to_id_map:
-                        image_name_to_id_map[new_image_id] = colmap_station_number
+                    if new_image_name not in image_name_to_id_map:
+                        image_name_to_id_map[new_image_name] = colmap_station_number
                         colmap_station_number += 1
-                        idx_str = f"{image_name_to_id_map[new_image_id]:04d}"
+                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
                     else:
-                        idx_str = f"{image_name_to_id_map[new_image_id]:04d}"
-                    image_name = f"cam{cam_n}/{idx_str}_{new_image_id}_{face}.jpg"
+                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
+                    image_name = f"cam{cam_n}/{idx_str}_{new_image_name}_{face}.jpg"
                     
                     # Convert rotation matrix to quaternion
                     qvec = rotmat2qvec(rotation_matrix)
                     
                     # Create a COLMAP Image object that's compatible with write_model
-                    augmented_colmap_images[colmap_position_number] = Image(
-                        id=colmap_position_number,
+                    augmented_colmap_images[len_all_augmented_images + colmap_position_number] = Image(
+                        id=len_all_augmented_images + colmap_position_number,
                         qvec=qvec,
                         tvec=translation_vector,
                         camera_id=1,  # Use camera ID 1 for all images
@@ -299,11 +302,15 @@ def interpolate_recordings(json_data, chunk_colmap_image_ids, all_image_names, i
                     )
                     
                     colmap_position_number += 1
+            else:
+                skipped_out_of_bounds+=1
+        else:
+            skipped_distance+=1
     
-    print(f"Added {len(new_recordings)} new recordings within chunk boundaries")
+    print(f"Added {len(new_recordings)} new recordings within chunk boundaries. Skipped {skipped_distance} due to distance and {skipped_out_of_bounds} due to out of bounds.")
     print(f"Created {len(augmented_colmap_images)} COLMAP image entries for augmented images")
     
-    return new_recordings, augmented_colmap_images, image_name_to_id_map
+    return new_recordings, augmented_colmap_images, all_image_names, image_name_to_id_map
 
 def write_colmap_images(output_path, images_dict):
     """Write COLMAP images_depths.bin file."""
@@ -326,7 +333,7 @@ def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, 
         images_depths_bin_path = os.path.join(colmap_bin_path, 'images_depths.bin')
         
         # Read COLMAP model for this chunk
-        cameras, images, points3D = read_colmap_model(colmap_bin_path)
+        _, images, _ = read_colmap_model(colmap_bin_path)
         
         # Extract ImageIds from COLMAP images for this chunk
         chunk_image_names, _ = extract_image_names_from_colmap(images)
@@ -335,21 +342,24 @@ def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, 
         center, extent = read_center_and_extent(center_path, extent_path)
         
         # Process the recordings for this chunk
-        chunk_new_recordings, chunk_augmented_images, image_name_to_id_map = interpolate_recordings(
-            json_data, chunk_image_names, all_image_names, image_name_to_id_map,
+        chunk_new_recordings, chunk_augmented_images, all_image_names, image_name_to_id_map = interpolate_recordings(
+            json_data, chunk_image_names, all_image_names, image_name_to_id_map, len(all_augmented_images),
             center, extent, translation, faces
         )
         
         # Add to the global collections
         all_new_recordings.extend(chunk_new_recordings)
+        print(f"Lenght of all_augmented_images: {len(all_augmented_images)}")
+        print(f"Lenght of chunk_augmented_images: {len(chunk_augmented_images)}")
         all_augmented_images.update(chunk_augmented_images)
+        print(f"After-merge of all_augmented_images: {len(all_augmented_images)}")
         
         # Write COLMAP images_depths.bin for this chunk
         write_colmap_images(images_depths_bin_path, chunk_augmented_images)
         
         print(f"Successfully processed chunk: {os.path.basename(chunk_folder)}")
         
-        return image_name_to_id_map
+        return all_new_recordings, all_augmented_images, all_image_names, image_name_to_id_map
         
     except Exception as e:
         print(f"Error processing chunk {os.path.basename(chunk_folder)}: {e}")
@@ -358,7 +368,6 @@ def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, 
 def collect_all_image_names(project_dir):
     """Collect all image names from the entire model."""
     aligned_path = os.path.join(project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
-    chunks_folder = os.path.join(project_dir, 'camera_calibration', 'chunks')
     
     all_image_names = set()
     
@@ -397,14 +406,14 @@ def main():
     aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
     
     try:
-        # Read the input JSON file
+        # Read the input JSON file (just data of train images)
         with open(recording_details_path, 'r') as f:
             data = json.load(f)
         
         # Read translation values
         translation = read_translation_values(translation_json_path)
         
-        # Collect all image IDs from the entire model first
+        # Collect all image IDs (both train and test) from the entire model first
         all_image_names, image_name_to_id_map = collect_all_image_names(args.project_dir)
         
         # Collections for all augmented data
@@ -417,7 +426,7 @@ def main():
         
         # Process each chunk
         for chunk_folder in tqdm(chunk_folders, desc="Processing chunks"):
-            image_name_to_id_map = process_chunk(
+            all_new_recordings, all_augmented_images, all_image_names, image_name_to_id_map = process_chunk(
                 chunk_folder, translation, faces, 
                 data, all_image_names, image_name_to_id_map,
                 all_augmented_images, all_new_recordings

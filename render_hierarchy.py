@@ -31,6 +31,7 @@ def direct_collate(x):
 
 @torch.no_grad()
 def render_set(args, scene, pipe, out_dir, tau, eval):
+    print(f"Rendering with tau: {tau}")
     render_path = out_dir
 
     render_indices = torch.zeros(scene.gaussians._xyz.size(0)).int().cuda()
@@ -127,6 +128,8 @@ if __name__ == "__main__":
     pp = PipelineParams(parser)
     parser.add_argument('--out_dir', type=str, default="")
     parser.add_argument("--taus", nargs="+", type=float, default=[0.0, 3.0, 6.0, 15.0])
+    # PACOMMENT: Added the image parameter to modify the standard parser one
+    # parser.add_argument("--images", type=str, default="images")
     args = parser.parse_args(sys.argv[1:])
     
     print("Rendering " + args.model_path)
@@ -134,6 +137,7 @@ if __name__ == "__main__":
     dataset, pipe = lp.extract(args), pp.extract(args)
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.active_sh_degree = dataset.sh_degree
+    
     scene = Scene(dataset, gaussians, resolution_scales = [1], create_from_hier=True)
 
     for tau in args.taus:

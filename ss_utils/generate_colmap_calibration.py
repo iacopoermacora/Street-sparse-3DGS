@@ -1,3 +1,17 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description:
+This script generates COLMAP calibration files from a cyclomedia recording_details JSON file.
+It processes the images, computes the camera intrinsics and extrinsics, and generates the 
+necessary COLMAP files (cameras.bin, images.bin, points3D.bin) and the recording_details files
+(for training and testing).
+It is possible to run the script in evaluation mode but the recording_details.json file must come
+from a 1mt spaced recording.
+'''
+
 import json
 import numpy as np
 import struct
@@ -8,14 +22,26 @@ import argparse
 from tqdm import tqdm
 import math
 import subprocess
-from read_write_model import rotmat2qvec
+from read_write_model import rotmat2qvec, write_cameras_binary, write_images_binary, write_points3D_binary, Camera, Image
+import shutil
 
 def parse_json(json_file):
+    """
+    Parse the recordin details JSON file to extract image information and metadata.
+
+    Args:
+        json_file (str): Path to the JSON file.
+
+    Returns:
+        tuple: A tuple containing:
+            - image_info (dict): A dictionary mapping ImageId to its properties (timestamp, x, y).
+            - metadata (dict): The entire JSON data from the RecordinProperties (list of images) loaded into a dictionary.
+    """
     print("Reading recording details...")
     with open(json_file, 'r') as f:
-        data = json.load(f)
+        metadata = json.load(f)
 
-    recordings = data['RecordingProperties']
+    recordings = metadata['RecordingProperties']
     image_info = {}
     
     # Extract relevant info from the json (ImageId, timestamp, GPS coordinates)
@@ -26,16 +52,21 @@ def parse_json(json_file):
             'y': record['X'],
         }
     
-    return image_info, data
+    return image_info, metadata
 
 def sort_images_by_time(image_info):
+    """
+    Sort images by their timestamp.
+    
+    Args:
+        image_info (dict): A dictionary mapping ImageId to its properties (timestamp, x, y).
+    
+    Returns:
+        list: A sorted list of tuples (ImageId, properties) based on timestamp.
+    """
     print("Sorting images...")
     sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
     return sorted_images
-
-def calculate_distance(x1, y1, x2, y2):
-    """Calculate Euclidean distance between two points"""
-    return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
 def select_eval_images(sorted_images, metadata, faces):
     """
@@ -44,15 +75,15 @@ def select_eval_images(sorted_images, metadata, faces):
     - If one of the 4 images after the selected one is distant more than 2m from the previous one,
       reset the count and select that one
     - For COLMAP conversion, also include the second image after the selected one (third of every 5)
-      if the distance constraint is met
+      if the distance constraint is met (this will be used for test.txt)
     
     Returns:
-    - selected_images: List of ImageIds for recording_details_truth.json
-    - colmap_images: List of ImageIds for COLMAP conversion
-    - test_images: List of ImageIds for test.txt (third images)
+    - train_images: List of ImageIds that will be used for training
+    - colmap_images: List of ImageIds for COLMAP conversion (includes both training and test images)
+    - test_images: List of ImageIds for test.txt
     """
     print("Selecting images for evaluation...")
-    selected_images = []
+    train_images = []
     colmap_images = []
     test_images = []
     
@@ -66,25 +97,29 @@ def select_eval_images(sorted_images, metadata, faces):
         current_x, current_y = current_record['X'], current_record['Y']
         
         # Select this image
-        selected_images.append(current_img_id)
+        train_images.append(current_img_id)
         colmap_images.append(current_img_id)
         
         # Check the next 4 images for distance constraint
         reset_count = False
         next_selected_idx = i + 5  # Default next image to select (5 images ahead)
         
+        # Check the distance to the next 4 images
         checking_x, checking_y = current_x, current_y
         for j in range(1, 5):
             if i + j >= len(sorted_images):
                 break
-                
+            
+            # Get the next image ID and its record
             next_img_id = sorted_images[i + j][0]
             next_record = image_to_record[next_img_id]
             next_x, next_y = next_record['X'], next_record['Y']
             
-            distance = calculate_distance(checking_x, checking_y, next_x, next_y)
+            # Calculate the euclidean distance
+            distance = math.sqrt((next_x - checking_x)**2 + (next_y - checking_y)**2)
             
-            if distance > 2:  # If distance > 2 meters
+            # If the distance is greater than 2m (the images should technically be 1mt spaced), reset the count
+            if distance > 2:
                 reset_count = True
                 next_selected_idx = i + j
                 break
@@ -93,19 +128,23 @@ def select_eval_images(sorted_images, metadata, faces):
         
         # If we're not resetting the count due to distance, 
         # add the third image (i+2) to test_images if it exists
+        # but only add the images 25% of the time (to have a train-test balance to be about 80-20)
         if not reset_count and i + 2 < len(sorted_images):
-            test_img_id = sorted_images[i + 2][0]
-            test_images.append(test_img_id)
-            colmap_images.append(test_img_id)
+            if np.random.rand() < 0.25:
+                # Add the third image to test_images
+                test_img_id = sorted_images[i + 2][0]
+                test_images.append(test_img_id)
+                colmap_images.append(test_img_id)
         
         # Move to the next image to select
         i = next_selected_idx
     
-    return selected_images, colmap_images, test_images
+    return train_images, colmap_images, test_images
 
 def create_image_id_to_index_mapping(colmap_image_ids, metadata):
     """
-    Create a consistent mapping from ImageId to index based on time-sorted colmap_image_ids.
+    Create a consistent mapping from ImageId to index based on time-sorted colmap_image_ids. Necessary for consistent naming of 
+    the images in the colmap files.
     
     Args:
         colmap_image_ids: List of ImageIds to be included in COLMAP
@@ -137,7 +176,19 @@ def create_image_id_to_index_mapping(colmap_image_ids, metadata):
     return image_id_to_index
 
 def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_index):
-    """Generate test.txt file with image names using consistent indexes"""
+    """
+    Generate test.txt file with image names using consistent indexes
+    
+    Args:
+        test_images (list): List of ImageIds to include in the test.txt file.
+        metadata (dict): The original metadata containing all images.
+        faces (list): List of cube faces to include in the test.txt file.
+        output_dir (str): Path to save the test.txt file.
+        image_id_to_index (dict): Mapping from ImageId to zero-padded index string.
+        
+    Returns:
+        None
+    """
     print("Generating test.txt file...")
     
     # Map from ImageId to the full record
@@ -180,7 +231,18 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
     print(f"Test file generated at {os.path.join(output_dir, 'test.txt')}")
 
 def create_filtered_json(image_ids, metadata, output_path, filename):
-    """Create a filtered JSON file with only the specified image IDs"""
+    """
+    Create a filtered JSON file with only the specified image IDs
+    
+    Args:
+        image_ids (list): List of ImageIds to include in the new JSON file.
+        metadata (dict): The original metadata containing all images.
+        output_path (str): Path to save the new JSON file.
+        filename (str): Name of the new JSON file.
+    
+    Returns:
+        None
+    """
     print(f"Creating {filename}...")
     
     # Create a new metadata object with only the selected records
@@ -195,33 +257,6 @@ def create_filtered_json(image_ids, metadata, output_path, filename):
         json.dump(new_metadata, f, indent=4)
     
     print(f"{filename} generated at {os.path.join(output_path, filename)}")
-
-# COLMAP text file format utilities
-def write_cameras_txt(filename, cameras):
-    with open(filename, 'w') as f:
-        f.write('# Camera list with one line of data per camera:\n')
-        f.write('#   CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]\n')
-        f.write('# Number of cameras: {}\n'.format(len(cameras)))
-        for camera_id, params in cameras.items():
-            param_str = ' '.join(map(str, params['params']))
-            f.write(f'{camera_id} {params["model"]} {params["width"]} {params["height"]} {param_str}\n')
-
-def write_images_txt(filename, images):
-    with open(filename, 'w') as f:
-        f.write('# Image list with one line of data per image:\n')
-        f.write('#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, IMAGE_NAME, \n')
-        f.write('#   POINTS2D[] as (X, Y, POINT3D_ID)\n')
-        f.write('# Number of images: {}\n'.format(len(images)))
-        for image_id, params in images.items():
-            qvec_str = ' '.join(map(str, params['qvec']))
-            tvec_str = ' '.join(map(str, params['tvec']))
-            f.write(f'{image_id} {qvec_str} {tvec_str} {params["camera_id"]} {params["name"]}\n\n')
-
-def write_points3D_txt(output_filename):
-    # Write directly to COLMAP format during single pass
-    with open(output_filename, 'w') as f:
-        f.write('# 3D point list with one line of data per point:\n')
-        f.write('#   POINT3D_ID, X, Y, Z, R, G, B, ERROR, TRACK[] as (IMAGE_ID, POINT2D_IDX)\n')
 
 def compute_intrinsics(cube_face_size):
     f = cube_face_size / 2  # Focal length assuming 90° FOV
@@ -305,35 +340,6 @@ def calculate_translation(rotation_matrix, position):
     
     return translation.flatten()
 
-def convert_txt_to_bin(input_path, output_path):
-    """
-    Converts a COLMAP model from text format (.txt) to binary format (.bin).
-
-    Args:
-        input_path (str): Path to the folder containing the .txt model files.
-        output_path (str): Path to the folder where the .bin model will be saved.
-
-    Raises:
-        RuntimeError: If the COLMAP command fails.
-    """
-    try:
-        subprocess.run(
-            [
-                "colmap", "model_converter",
-                "--input_path", input_path,
-                "--output_path", output_path,
-                "--output_type", "BIN"
-            ],
-            check=True
-        )
-        print(f"Successfully converted model from TXT to BIN. Output saved in: {output_path}")
-        # Remove the input files directory
-        os.system(f"rm -r {input_path}")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"COLMAP model_converter failed: {e}")
-    except FileNotFoundError:
-        raise RuntimeError("COLMAP executable not found. Make sure COLMAP is installed and added to your PATH.")
-
 def compute_centering_translation(metadata):
     """
     Compute translation values to center the model at (0,0) for x and y.
@@ -354,11 +360,11 @@ def compute_centering_translation(metadata):
     
     return x_center, y_center
 
-def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces, eval_mode=False):
-    import subprocess
-
+def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mode=False):
+    
     start_time = datetime.now()
-    os.makedirs(output_dir, exist_ok=True)
+
+    # Create output directory if it doesn't exist
     os.makedirs(os.path.dirname(output_dir_bin), exist_ok=True)
 
     # Load recording details
@@ -373,13 +379,14 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
     # Handle --eval parameter
     if eval_mode:
         print("Running in evaluation mode")
-        # Select images based on time and distance
-        selected_images, colmap_image_ids, test_images = select_eval_images(sorted_images, metadata, faces)
+
+        # Select test images based on time and distance costraints
+        train_images, colmap_image_ids, test_images = select_eval_images(sorted_images, metadata, faces)
         
-        # Create recording_details_train.json
-        create_filtered_json(selected_images, metadata, os.path.dirname(recording_details_path), 'recording_details_train.json')
+        # Create recording_details_train.json with the images selected for training
+        create_filtered_json(train_images, metadata, os.path.dirname(recording_details_path), 'recording_details_train.json')
         
-        # Create recording_details_train_test.json
+        # Create recording_details_train_test.json with the images selected for both training and testing
         create_filtered_json(colmap_image_ids, metadata, os.path.dirname(recording_details_path), 'recording_details_train_test.json')
         
         # Create consistent mapping from ImageId to index
@@ -392,13 +399,12 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
         # Get all image IDs
         all_image_ids = [img_id for img_id, _ in sorted_images]
         
-        # Just copy recording_details.json to recording_details_train.json
-        import shutil
+        # Just copy recording_details.json to recording_details_train.json (there are not train/test images, all images are used for training)
         truth_path = os.path.join(os.path.dirname(recording_details_path), 'recording_details_train.json')
         shutil.copy(recording_details_path, truth_path)
         print(f"Created {truth_path}")
         
-        # Also copy recording_details.json to recording_details_train_test.json
+        # Also copy recording_details.json to recording_details_train_test.json (there are not train/test images, all images are used for training)
         colmap_path = os.path.join(os.path.dirname(recording_details_path), 'recording_details_train_test.json')
         shutil.copy(recording_details_path, colmap_path)
         print(f"Created {colmap_path}")
@@ -409,7 +415,7 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
         # Create consistent mapping from ImageId to index
         image_id_to_index = create_image_id_to_index_mapping(colmap_image_ids, metadata)
     
-    # Compute the translation values to center the model at (0,0)
+    # Compute the translation values to center the model at (0,0), as required by COLMAP
     x_center, y_center = compute_centering_translation(metadata)
     
     # Save the translation values to translation.json
@@ -427,12 +433,11 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
     metadata_records = {record['ImageId']: record for record in metadata['RecordingProperties']}
     
     cameras = {
-        1: {
-            'model': 'SIMPLE_PINHOLE',
-            'width': cube_face_size,
-            'height': cube_face_size,
-            'params': compute_intrinsics(cube_face_size),
-        }
+    1: Camera(id=1, # Add the camera ID here
+              model='SIMPLE_PINHOLE',
+              width=cube_face_size,
+              height=cube_face_size,
+              params=np.array(compute_intrinsics(cube_face_size))) # Ensure params is a numpy array if needed by the writer
     }
 
     images = {}
@@ -483,42 +488,43 @@ def main(recording_details_path, output_dir, output_dir_bin, cube_face_size, fac
             image_name = f"cam{cam_n}/{idx_str}_{record['ImageId']}_{face}.jpg"
 
             qvec = rotmat2qvec(rotation_matrix)
-            images[image_id] = {
-                'qvec': qvec,
-                'tvec': translation_vector,
-                'camera_id': 1,
-                'name': image_name,
-            }
+            images[image_id] = Image(id=image_id, # Use the current image_id loop variable
+                         qvec=qvec,
+                         tvec=translation_vector,
+                         camera_id=1, # Or the relevant camera ID if dynamic
+                         name=image_name,
+                         xys=np.empty((0, 2)), # Empty placeholder for 2D points
+                         point3D_ids=np.full(0, -1, dtype=np.int64)) # Empty placeholder for 3D point IDs
             image_id += 1
-
-    # Write COLMAP files
-    write_cameras_txt(os.path.join(output_dir, 'cameras.txt'), cameras)
-    write_points3D_txt(os.path.join(output_dir, 'points3D.txt'))
-    write_images_txt(os.path.join(output_dir, 'images.txt'), images)
-
-    # Create the directory structure for the binary output
-    os.makedirs(os.path.dirname(output_dir_bin), exist_ok=True)
-    if not os.path.exists(os.path.dirname(output_dir_bin)):
-        os.makedirs(os.path.dirname(output_dir_bin))
     
-    # Convert COLMAP files to binary format
-    convert_txt_to_bin(output_dir, output_dir_bin)
+    # Create an empty points3D dictionary
+    points3D = {}
+
+    # Write binary files directly
+    print(f"Writing binary COLMAP files to {output_dir_bin}...")
+    write_cameras_binary(cameras, os.path.join(output_dir_bin, 'cameras.bin')) #
+    write_images_binary(images, os.path.join(output_dir_bin, 'images.bin')) #
+    write_points3D_binary(points3D, os.path.join(output_dir_bin, 'points3D.bin')) #
+    print("Binary COLMAP files generated successfully.")
 
     end_time = datetime.now()
     print(f"Processing completed in {end_time - start_time}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--calibration', type=str, default="sfm",  help="Preprocessing workflow to execute. Options: sfm, cal_sfm, cal")
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
     parser.add_argument('--eval', action='store_true', help="Enable evaluation mode to select one image every 5 and check distance constraints")
 
+    # Additional arguments to tweak certain parameters
+    parser.add_argument('--cube_face_size', type=int, default=1536, help="Size of the cube face in pixels")
     args = parser.parse_args()
-    # Example usage
+    
+    # Define paths and parameters
     recording_details_path = f"{args.project_dir}/ss_raw_images/recording_details.json"
-    output_dir = f"{args.project_dir}/colmap_output"
     output_dir_bin = f"{args.project_dir}/camera_calibration/unrectified/sparse/0/"
-    cube_face_size = 1536
+    cube_face_size = args.cube_face_size
+
+    # Allow the user to choose the directions of the cube faces
     choice = 0
     while choice not in ["1", "2", "3"]:
             print("Choose the directions you want to use:")
@@ -535,4 +541,4 @@ if __name__ == "__main__":
                 faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
             else:
                 print("Invalid choice. Please try again.")
-    main(recording_details_path, output_dir, output_dir_bin, cube_face_size, faces, args.eval)
+    main(recording_details_path, output_dir_bin, cube_face_size, faces, args.eval)

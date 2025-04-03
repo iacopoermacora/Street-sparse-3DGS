@@ -1,6 +1,38 @@
 import os
 import shutil
 import datetime
+import argparse
+
+def change_permissions_recursively(path):
+    """
+    Change permissions of a directory and all its contents to full access for everyone.
+    
+    Args:
+        path (str): The root directory path to modify permissions
+    """
+    try:
+        # 0o777 = read, write, execute (full permissions) for owner, group, and others
+        # This enables copying, moving, removing, and all other file operations
+        os.chmod(path, 0o777)
+        
+        # Recursively change permissions for all files and subdirectories
+        for root, dirs, files in os.walk(path):
+            # Change directory permissions to full access
+            for dir_name in dirs:
+                full_path = os.path.join(root, dir_name)
+                os.chmod(full_path, 0o777)
+            
+            # Change file permissions to full read-write-execute
+            for file_name in files:
+                full_path = os.path.join(root, file_name)
+                os.chmod(full_path, 0o777)
+        
+        print(f"Permissions changed successfully for {path}")
+    
+    except PermissionError:
+        print(f"Permission denied. You may need to run this script with sudo.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 # Function to prompt user for input
 def get_user_input():
@@ -29,19 +61,20 @@ def copy_folders(location_name, description, storage_path):
     dataset_folder = os.path.join(new_folder, "Dataset")
     
     # Define the list of folders to copy
-    folders_to_copy = ["ss_raw_images", "inputs"]
+    folders_to_copy = ["camera_calibration", "ss_raw_images", "inputs"]
+
+    # Change permissions of the vis2mesh folder
+    vis2mesh_folder = os.path.join(args.project_dir, "camera_calibration", "depth_files", "vis2mesh")
+    change_permissions_recursively(vis2mesh_folder)
     
     # Create the new directory
     if not os.path.exists(new_folder):
         os.makedirs(new_folder)
         os.makedirs(dataset_folder)
 
-    # Get current project root
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
     # Copy each folder to the new directory
     for folder in folders_to_copy:
-        source_folder = os.path.join(base_path, folder)
+        source_folder = os.path.join(args.project_dir, folder)
         destination_folder = os.path.join(dataset_folder, folder)
         if os.path.exists(source_folder):
             print(f"Copying folder {folder} to {dataset_folder}, this might take a while...")
@@ -68,4 +101,7 @@ def main():
 
 # Run the script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
     main()

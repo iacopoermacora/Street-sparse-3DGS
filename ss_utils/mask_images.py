@@ -8,15 +8,19 @@ import numpy as np
 import io
 import base64
 import cv2
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+args = parser.parse_args()
 
 # Flask app
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # Required for session management
 
 # Constants
-base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-INPUT_DIR = f"{base_path}/ss_utils/static/images"
-OUTPUT_DIR = f"{base_path}/inputs/masks"
+INPUT_DIR = f"{args.project_dir}/inputs/images" # Used to be /ss_utils/static/images
+OUTPUT_DIR = f"{args.project_dir}/inputs/masks"
 
 # List of images and masks
 images_path = []
@@ -58,10 +62,10 @@ def save_mask(mask_array, output_path, image_path):
     # Check face of the image from image_path 
     face = image_path.split('/')[-1].split('.')[0].split('_')[-1]
     print(f'Checking for additional mask for face {face}')
-    if os.path.exists(f'{base_path}/ss_utils/manual_masks/manual_mask_{face}.jpg'):
+    if os.path.exists(f'{args.project_dir}/ss_utils/manual_masks/manual_mask_{face}.jpg'):
         print('Applying additional mask')
         # Load the additional mask
-        additional_mask = cv2.imread(f'{base_path}/ss_utils/manual_masks/manual_mask_{face}.jpg', cv2.IMREAD_GRAYSCALE)
+        additional_mask = cv2.imread(f'{args.project_dir}/ss_utils/manual_masks/manual_mask_{face}.jpg', cv2.IMREAD_GRAYSCALE)
 
         # Make sure that the mask is binary (0 or 255)
         additional_mask = (additional_mask > 0).astype(np.uint8)
@@ -251,7 +255,7 @@ def final_page():
 # Serve images from the inputs folder
 @app.route('/images/<path:filename>')
 def serve_image(filename):
-    return send_from_directory('/host/inputs/images', filename)
+    return send_from_directory(f'{args.project_dir}/inputs/images', filename)
 
 # Process all images
 def process_all_images():
@@ -268,4 +272,4 @@ def process_all_images():
 # Main entry point
 if __name__ == '__main__':
     process_all_images()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5001)

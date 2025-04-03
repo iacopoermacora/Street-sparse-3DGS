@@ -45,7 +45,7 @@ class ParamGroup:
         return group
 
 class ModelParams(ParamGroup): 
-    def __init__(self, parser, sentinel=False):
+    def __init__(self, parser, sentinel=False): # PACOMMENT: I added the additional_depth_maps parameter
         self.sh_degree = 3
         self._source_path = ""
         self._model_path = ""
@@ -65,6 +65,8 @@ class ModelParams(ParamGroup):
         self.scaffold_file = ""
         self.bounds_file = ""
         self.skybox_locked = False
+        self.additional_depth_maps = False # PACOMMENT: I added this line
+        self.gt_point_cloud_constraints = False # PACOMMENT: I added this line
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

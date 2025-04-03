@@ -20,7 +20,9 @@ import cv2
 WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
-    image = Image.open(cam_info.image_path)
+
+    if not cam_info.is_depth_only:
+        image = Image.open(cam_info.image_path)
 
     if cam_info.mask_path != "":
         try:
@@ -52,7 +54,12 @@ def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
     else:
         invdepthmap = None
 
-    orig_w, orig_h = image.size
+    if not cam_info.is_depth_only:
+        orig_w, orig_h = image.size
+    else:
+        # Open depth map to get size
+        depth_image = Image.open(cam_info.depth_path)
+        orig_w, orig_h = depth_image.size
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
@@ -72,6 +79,10 @@ def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
 
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
+    
+    if cam_info.is_depth_only:
+        # Create a dummy black image
+        image = Image.new('RGB', (int(orig_w / scale), int(orig_h / scale)), color='black')
 
     return Camera(resolution, colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, depth_params=cam_info.depth_params,

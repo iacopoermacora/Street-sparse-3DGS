@@ -1,24 +1,20 @@
 import os
 import shutil
+import argparse
 
 # Function to delete folders
 def delete_folders():
-    folders_to_delete = ["output", "camera_calibration", "colmap_output_added_bin"]
-
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    folders_to_delete = ["output"]
     
     # Ask user for confirmation
     for folder in folders_to_delete:
-        if os.path.exists(os.path.join(base_path, folder)):
-            print(f"Removing folder '{folder}")
+        if os.path.exists(os.path.join(args.project_dir, folder)):
+            print(f"Removing folder '{os.path.join(args.project_dir, folder)}")
             # Delete the folder and its contents
-            shutil.rmtree(folder)
-            print(f"Folder '{folder}' has been removed.")
+            shutil.rmtree(os.path.join(args.project_dir, folder))
+            print(f"Folder '{os.path.join(args.project_dir, folder)}' has been removed.")
         else:
             print(f"Error: folder '{folder}' does now exist.")
-    
-    # Make the ss_raw_images folder if it does not exist
-    os.makedirs(os.path.join(base_path, "ss_raw_images"), exist_ok=True)
 
 # Main function to run the script
 def main():
@@ -32,4 +28,7 @@ def main():
 
 # Run the script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
     main()

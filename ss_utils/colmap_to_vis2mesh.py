@@ -5,6 +5,54 @@ import numpy as np
 import argparse
 from read_write_model import read_cameras_binary, read_images_binary, qvec2rotmat
 
+def add_item(image, cameras, output):
+    """
+    Processes a single image and adds its data to the output dictionary.
+    
+    Args:
+        image: The image object from COLMAP.
+        cameras: The dictionary of cameras from COLMAP.
+        output: The output dictionary to which the image data will be added.
+    """
+    # Use COLMAP's qvec2rotmat to obtain the 3x3 rotation matrix.
+    R = qvec2rotmat(image.qvec)
+    # Ensure tvec is a column vector.
+    t = np.array(image.tvec).reshape(3, 1)
+    # Compute the camera center: C = -R^T * t.
+    C = (-np.dot(R.T, t)).flatten().tolist()
+    
+    # Retrieve the camera corresponding to this image.
+    camera = cameras[image.camera_id]
+    # For a PINHOLE camera, COLMAP stores parameters as [f, cx, cy].
+    f = camera.params[0]
+    cx = camera.params[1]
+    cy = camera.params[2]
+    K = [
+        [f, 0, cx],
+        [0, f, cy],
+        [0, 0, 1]
+    ]
+    
+    entry = {
+        "C": C,
+        "K": K,
+        "R": R.tolist(),
+        "width": camera.width,
+        "height": camera.height
+    }
+    output["imgs"].append(entry)
+
+    # Add a second entry with the camera center shifted 1.5 meters higher in space
+    C_higher = [C[0], C[1] + 1.5, C[2]]  # Add 1.5 meters to the Y-coordinate
+    entry_higher = {
+        "C": C_higher,
+        "K": K,
+        "R": R.tolist(),
+        "width": camera.width,
+        "height": camera.height
+    }
+    output["imgs"].append(entry_higher)
+
 def convert_colmap_bin_to_json(model_dir, output_file):
     """
     Reads COLMAP binary model files from model_dir (expecting cameras.bin and images.bin)
@@ -17,42 +65,24 @@ def convert_colmap_bin_to_json(model_dir, output_file):
       - "width" and "height": from the camera model.
     """
     cameras_path = os.path.join(model_dir, "cameras.bin")
+    # Add both images from images.bin and images_depth.bin
     images_path = os.path.join(model_dir, "images.bin")
+    images_depth_path = os.path.join(model_dir, "images_depth.bin")
     
     # Read the binary model files using COLMAP's provided functions.
     cameras = read_cameras_binary(cameras_path)
     images = read_images_binary(images_path)
+    images_depth = read_images_binary(images_depth_path)
     
     output = {"imgs": []}
     
+    # Process images
     for image_id, image in images.items():
-        # Use COLMAP's qvec2rotmat to obtain the 3x3 rotation matrix.
-        R = qvec2rotmat(image.qvec)
-        # Ensure tvec is a column vector.
-        t = np.array(image.tvec).reshape(3, 1)
-        # Compute the camera center: C = -R^T * t.
-        C = (-np.dot(R.T, t)).flatten().tolist()
-        
-        # Retrieve the camera corresponding to this image.
-        camera = cameras[image.camera_id]
-        # For a PINHOLE camera, COLMAP stores parameters as [f, cx, cy].
-        f = camera.params[0]
-        cx = camera.params[1]
-        cy = camera.params[2]
-        K = [
-            [f, 0, cx],
-            [0, f, cy],
-            [0, 0, 1]
-        ]
-        
-        entry = {
-            "C": C,
-            "K": K,
-            "R": R.tolist(),
-            "width": camera.width,
-            "height": camera.height
-        }
-        output["imgs"].append(entry)
+        add_item(image, cameras, output)
+    
+    # Process images_depth
+    for image_id, image in images_depth.items():
+        add_item(image, cameras, output)
 
     if not os.path.exists(os.path.dirname(output_file)):
         os.makedirs(os.path.dirname(output_file))

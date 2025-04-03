@@ -24,6 +24,8 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_hierarchy._C import load_hierarchy, write_hierarchy
 from scene.OurAdam import Adam
 
+# import faiss
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -46,7 +48,7 @@ class GaussianModel:
 
 
 
-    def __init__(self, sh_degree : int):
+    def __init__(self, sh_degree : int, gt_point_cloud_path : str = None):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
         self._xyz = torch.empty(0)
@@ -68,6 +70,10 @@ class GaussianModel:
 
         self.skybox_points = 0
         self.skybox_locked = True
+
+        self.gt_point_cloud = None # PACOMMENT: Added this to store the ground truth point cloud
+        if gt_point_cloud_path and os.path.exists(gt_point_cloud_path):
+            self.load_gt_point_cloud(gt_point_cloud_path)
 
         self.setup_functions()
 
@@ -617,7 +623,7 @@ class GaussianModel:
         self.max_radii2D = torch.cat((self.max_radii2D, torch.zeros((new_xyz.shape[0]), device="cuda")))
         #self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
-    def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
+    def densify_and_split(self, grads, grad_threshold, scene_extent, gt_point_cloud_constraints, N=2):
         n_init_points = self.get_xyz.shape[0]
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
@@ -636,6 +642,11 @@ class GaussianModel:
         samples = torch.normal(mean=means, std=stds)
         rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
         new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
+
+        if gt_point_cloud_constraints:
+            # PACOMMENT: Inserted here the filtering of the points that are too far from the gt
+            new_xyz, selected_pts_mask, _ = self.compare_points_to_gt(new_xyz)
+
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
@@ -667,12 +678,12 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    def densify_and_prune(self, max_grad, min_opacity, extent):
+    def densify_and_prune(self, max_grad, min_opacity, extent, gt_point_cloud_constraints):
         grads = self.xyz_gradient_accum 
         grads[grads.isnan()] = 0.0
 
         self.densify_and_clone(grads, max_grad, extent)
-        self.densify_and_split(grads, max_grad, extent)
+        self.densify_and_split(grads, max_grad, extent, gt_point_cloud_constraints)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if self.scaffold_points is not None:
@@ -687,3 +698,81 @@ class GaussianModel:
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] = torch.max(torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True), self.xyz_gradient_accum[update_filter])
         self.denom[update_filter] += 1
+
+    def load_gt_point_cloud(self, gt_point_cloud_path): # PACOMMENT: Added this function to load the ground truth point cloud
+        """
+        Loads the ground truth point cloud from a .ply file
+        Assumes points are in meters.
+        """
+
+        plydata = PlyData.read(gt_point_cloud_path)
+        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])),  axis=1)
+        
+        xyz = xyz.astype(np.float32)
+
+        # Create index - using Euclidean distance (L2)
+        self.gt_point_cloud = faiss.IndexFlatL2(3)  # 3D points
+
+        # Add points to the index
+        self.gt_point_cloud.add(xyz)
+
+        print(f"Loaded {xyz.shape[0]} points into FAISS index")
+        
+        # If GPU is available, we can make the index use GPU for even faster queries
+        if torch.cuda.is_available():
+            # This creates a GPU version of the index
+            try:
+                res = faiss.StandardGpuResources()
+                self.gt_point_cloud = faiss.index_cpu_to_gpu(res, 0, self.gt_point_cloud)
+                print("FAISS index moved to GPU")
+            except Exception as e:
+                print(f"Could not move FAISS index to GPU: {e}. Using CPU index instead.")
+
+
+    def compare_points_to_gt(self, new_xyz):
+        """
+        Only keep points that are within 1 cm of the ground truth point cloud.
+
+        Args:
+            new_xyz: The new points that have been filtered.
+            selected_pts_mask: A boolean mask indicating which points were selected for densification.
+
+        Returns:
+            A boolean mask indicating which points are selected for densification after further distance filtering.
+        """
+        # gt_point_cloud = self.gt_point_cloud
+
+        # # Compute the minimum distance between each point and the ground truth point cloud
+        # dists = torch.cdist(new_xyz, gt_point_cloud)
+        # min_dists = torch.min(dists, dim=1).values
+
+        # # Keep only the points that are within 1 cm of the ground truth point cloud
+        # filtered_points_mask = min_dists < 0.01
+        # new_xyz_filtered = new_xyz[filtered_points_mask]
+        
+        # return new_xyz_filtered, filtered_points_mask
+
+        print("Filtering points based on distance to ground truth point cloud")
+
+        distance_threshold = 0.01  # 1 cm
+
+        new_xyz_np = new_xyz.detach().cpu().numpy().astype(np.float32)
+
+        print(f"Searching for nearest neighbors in the ground truth point cloud...")
+
+        # Search for nearest neighbors
+        distances, _ = self.gt_point_cloud.search(new_xyz_np, k=1)
+
+        print(f"Found nearest neighbors in the ground truth point cloud")
+
+        # Identify points that have neighbors within the threshold
+        # distances shape is (n_points, k) = (n_points, 1) in this case
+        points_to_keep = distances[:, 0] <= distance_threshold**2  # FAISS returns squared L2 distances
+
+        # Count how many points have been discarded
+        num_discarded = len(new_xyz) - points_to_keep.sum()
+
+        # Return the filtered points
+        return new_xyz[points_to_keep], points_to_keep, num_discarded

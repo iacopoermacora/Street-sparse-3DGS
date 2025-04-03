@@ -8,6 +8,7 @@ import piexif
 from PIL.ExifTags import TAGS, GPSTAGS
 from fractions import Fraction
 from tqdm import tqdm
+import argparse
 
 # Step 1: Parse JSON to get image info and timestamps
 def parse_json(json_file):
@@ -39,13 +40,13 @@ def sort_images_by_time(image_info):
     return sorted_images
 
 # Step 4: Copy and rename images
-def copy_and_rename_images(images, base_path, raw_image_input, directions):
+def copy_and_rename_images(images, raw_image_input, directions):
 
     print("Copying images and converting GPS coordinates")
 
-    if not os.path.exists(os.path.join(base_path, "inputs/images")):
-        os.makedirs(os.path.join(base_path, "inputs/images"))
-        inputs_image_folder = os.path.join(base_path, "inputs/images")
+    if not os.path.exists(os.path.join(args.project_dir, "inputs/images")):
+        os.makedirs(os.path.join(args.project_dir, "inputs/images"))
+        inputs_image_folder = os.path.join(args.project_dir, "inputs/images")
     else:
         # Throw an error if the folder already exists
         raise Exception("Input folder already exists. Please remove the existing folder.")
@@ -124,8 +125,11 @@ def update_exif(image_path, x, y):
 
 # Call the main function
 if __name__ == "__main__":
-    base_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    raw_input = f"{base_path}/ss_raw_images"
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
+
+    raw_input = f"{args.project_dir}/ss_raw_images"
     raw_image_input = f"{raw_input}/images/level_2/color"
     json_file = os.path.join(raw_input, "recording_details_train_test.json")
     image_info = parse_json(json_file)
@@ -147,5 +151,5 @@ if __name__ == "__main__":
             directions = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
         else:
             print("Invalid choice. Please try again.")
-    copy_and_rename_images(sorted_images, base_path, raw_image_input, directions)
+    copy_and_rename_images(sorted_images, raw_image_input, directions)
 

@@ -41,6 +41,7 @@ class CameraInfo(NamedTuple):
     width: int
     height: int
     is_test: bool
+    is_depth_only: bool
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
@@ -116,6 +117,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
         image_path = os.path.join(images_folder, extr.name)
         image_name = extr.name
         if not os.path.exists(image_path):
+            print("\n", image_path, "not found")
             image_path = os.path.join(images_folder, f"{extr.name[:-n_remove]}.jpg")
             image_name = f"{extr.name[:-n_remove]}.jpg"
         if not os.path.exists(image_path):
@@ -127,7 +129,77 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, primx=primx, primy=primy, depth_params=depth_params,
                               image_path=image_path, mask_path=mask_path, depth_path=depth_path, image_name=image_name, 
-                              width=width, height=height, is_test=image_name in test_cam_names_list)
+                              width=width, height=height, is_test=image_name in test_cam_names_list, is_depth_only=False)
+        cam_infos.append(cam_info)
+    sys.stdout.write('\n')
+    return cam_infos
+
+def readColmapDepthOnlyCameras(path, depths_params, depths_folder, masks_folder): # PACOMMENT: I added this function
+    try:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images_depths.bin")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
+        cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
+    except:
+        cameras_extrinsic_file = os.path.join(path, "sparse/0", "images_depths.txt")
+        cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.txt")
+        cam_extrinsics = read_extrinsics_text(cameras_extrinsic_file)
+        cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
+
+    cam_infos = []
+    for idx, key in enumerate(cam_extrinsics):
+        sys.stdout.write('\r')
+        # the exact output you're looking for:
+        sys.stdout.write("Reading depth-only camera {}/{}".format(idx+1, len(cam_extrinsics)))
+        sys.stdout.flush()
+
+        extr = cam_extrinsics[key]
+        intr = cam_intrinsics[extr.camera_id]
+        height = intr.height
+        width = intr.width
+
+        uid = intr.id
+        R = np.transpose(qvec2rotmat(extr.qvec))
+        T = np.array(extr.tvec)
+
+        if intr.model=="SIMPLE_PINHOLE":
+            focal_length_x = intr.params[0]
+            primx = float(intr.params[1]) / width
+            primy = float(intr.params[2]) / height
+            FovY = focal2fov(focal_length_x, height)
+            FovX = focal2fov(focal_length_x, width)
+        elif intr.model=="PINHOLE":
+            primx = float(intr.params[2]) / width
+            primy = float(intr.params[3]) / height
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1]
+            FovY = focal2fov(focal_length_y, height)
+            FovX = focal2fov(focal_length_x, width)
+        else:
+            assert False, "Colmap camera model not handled: only undistorted datasets (PINHOLE or SIMPLE_PINHOLE cameras) supported!"
+        
+        # Similar camera info extraction as in readColmapCameras
+        # But set is_test to False and handle depth-specific path
+        n_remove = len(extr.name.split('.')[-1]) + 1
+        depth_path = os.path.join(depths_folder, f"{extr.name[:-n_remove]}.png") if depths_folder != "" else ""
+        mask_path = os.path.join(masks_folder, f"{extr.name[:-n_remove]}.png") if masks_folder != "" else ""
+        
+        depth_params = None
+        if depths_params is not None:
+            try:
+                depth_params = depths_params[extr.name[:-n_remove]]
+            except:
+                print("\n", key, "not found in depths_params")
+
+        cam_info = CameraInfo(
+            uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, primx=primx, primy=primy, depth_params=depth_params, width=width, height=height,
+            is_test=False,  # Depth-only cameras are not test cameras
+            depth_path=depth_path,
+            mask_path=mask_path,  # No mask for depth-only cameras
+            image_path="",  # No image for depth-only cameras
+            image_name=extr.name,
+            is_depth_only=True
+        )
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
@@ -177,7 +249,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffhold=None):
+def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, additional_depth_maps, llffhold=None): # PACOMMENT: I added the additional_depth_maps parameter
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -255,6 +327,18 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, llffh
 
     train_cam_infos = [c for c in cam_infos if train_test_exp or not c.is_test]
     test_cam_infos = [c for c in cam_infos if c.is_test]
+
+    # PACOMMENT: Adding the logic to also include the additional depth maps in the training set
+    depth_only_cam_infos = []
+    if additional_depth_maps:
+        depth_only_cam_infos = readColmapDepthOnlyCameras(
+            path, 
+            depths_params, 
+            os.path.join(path, depths) if depths != "" else "",
+            masks_reading_dir
+        )
+        train_cam_infos.extend(depth_only_cam_infos)
+
     print(len(test_cam_infos), "test images")
     print(len(train_cam_infos), "train images")
 

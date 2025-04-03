@@ -22,13 +22,19 @@ from torch.utils.data import DataLoader
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 
+from sklearn.neighbors import KDTree
+import numpy as np
+
 def direct_collate(x):
     return x
 
 def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
     first_iter = 0
     prepare_output_and_logger(dataset)
-    gaussians = GaussianModel(dataset.sh_degree)
+    if dataset.gt_point_cloud_constraints: # PACOMMENT: added this differentiation
+        gaussians = GaussianModel(dataset.sh_degree, f"{dataset.source_path}/chunk.ply")
+    else:
+        gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
     if checkpoint:
@@ -57,6 +63,12 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
     while iteration < opt.iterations + 1:
         for viewpoint_batch in training_generator:
             for viewpoint_cam in viewpoint_batch:
+
+                is_depth_only = viewpoint_cam.is_depth_only # PACOMMENT: Added this line
+
+                if is_depth_only and not dataset.additional_depth_maps:
+                    continue
+
                 background = torch.rand((3), dtype=torch.float32, device="cuda")
 
                 viewpoint_cam.world_view_transform = viewpoint_cam.world_view_transform.cuda()
@@ -97,16 +109,24 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 render_pkg = render(viewpoint_cam, gaussians, pipe, background, indices = indices, use_trained_exp=True)
                 image, invDepth, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["depth"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
 
-                # Loss
-                gt_image = viewpoint_cam.original_image.cuda()
-                if viewpoint_cam.alpha_mask is not None:
-                    alpha_mask = viewpoint_cam.alpha_mask.cuda()
-                    image *= alpha_mask
+                # Photometric Loss
+                if not is_depth_only: # PACOMMENT: Added this condition
+                    gt_image = viewpoint_cam.original_image.cuda()
+                    if viewpoint_cam.alpha_mask is not None: 
+                        # PACOMMENT: NOTE: I could introduce training just on places where there are gaussians
+                        # but then at the beginning of the training it would not optimise? Because where there 
+                        # is no background there would be no loss... Maybe have to think of another solution
+                        alpha_mask = viewpoint_cam.alpha_mask.cuda()
+                        image *= alpha_mask
+                    
+                    Ll1 = l1_loss(image, gt_image)
+                    Lssim = (1.0 - ssim(image, gt_image))
+                    photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
+                    loss = photo_loss.clone()
+                else:
+                    loss = torch.tensor(0.0, device="cuda")
                 
-                Ll1 = l1_loss(image, gt_image)
-                Lssim = (1.0 - ssim(image, gt_image))
-                photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
-                loss = photo_loss.clone()
+                # Depth Loss
                 Ll1depth_pure = 0.0
                 if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
                     mono_invdepth = viewpoint_cam.invdepthmap.cuda()
@@ -119,13 +139,23 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 else:
                     Ll1depth = 0
 
+                if is_depth_only: # PACOMMENT: Added this condition
+                    loss = loss*2
+                
+                # # Pointcloud GT Loss
+                if dataset.gt_point_cloud_constraints and gaussians.gt_point_cloud is not None: # PACOMMENT: Added this, a thought must be made about the weights
+                    # Use visibility_filter to select only visible Gaussians
+                    visible_gaussians_xyz = gaussians._xyz[visibility_filter]
+                    _, _, wrong_points = gaussians.compare_points_to_gt(visible_gaussians_xyz)
+                    loss += wrong_points / len(visible_gaussians_xyz)
 
                 loss.backward()
                 iter_end.record()
 
                 with torch.no_grad():
                     # Progress bar
-                    ema_loss_for_log = 0.4 * photo_loss.item() + 0.6 * ema_loss_for_log
+                    if not is_depth_only: # PACOMMENT: Added this condition
+                        ema_loss_for_log = 0.4 * photo_loss.item() + 0.6 * ema_loss_for_log
                     ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
                     if iteration % 10 == 0:
                         progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Size": f"{gaussians._xyz.size(0)}"})
@@ -140,7 +170,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     if iteration == opt.iterations:
                         progress_bar.close()
                         return
-
+                    
                     # Densification
                     if iteration < opt.densify_until_iter:
                         # Keep track of max radii in image-space for pruning
@@ -148,11 +178,19 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                         gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
 
                         if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
-                            gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent)
+                            gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, dataset.gt_point_cloud_constraints)
                         
                         if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                             print("-----------------RESET OPACITY!-------------")
                             gaussians.reset_opacity()
+
+                    # if is_depth_only: # PACOMMENT: Added this block
+                    #     if gaussians._features_dc.grad is not None:
+                    #         gaussians._features_dc.grad.zero_()
+                    #     if gaussians._features_rest.grad is not None:
+                    #         gaussians._features_rest.grad.zero_()
+                    #     if gaussians._opacity.grad is not None:
+                    #         gaussians._opacity.grad.zero_()
 
                     # Optimizer step
                     if iteration < opt.iterations:
@@ -208,7 +246,7 @@ def prepare_output_and_logger(args):
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
-    lp = ModelParams(parser)
+    lp = ModelParams(parser) # PACOMMENT: Added the additional_depth_maps and the gt_point_cloud_constraints parameters.
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")

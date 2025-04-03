@@ -1,20 +1,19 @@
 import os
 import shutil
+import argparse
 
 # Function to copy the folders
 def copy_folders(source_dir):
     
-    folders_to_copy = ["camera_calibration", "output", "colmap_output_added_bin"]
+    folders_to_copy = ["output"]
 
-    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
-    if not os.path.exists(os.path.join(base_path, "ss_raw_images")) or not os.path.exists(os.path.join(base_path, "inputs")):
+    if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images")) or not os.path.exists(os.path.join(args.project_dir, "inputs")):
         print("Error: the 'ss_raw_images' and 'inputs' folders do not exist in the current directory. Please make sure to have the correct folder structure before importing data.")
         return
 
     # Check if the folders already exist in the current directory
     for folder in folders_to_copy:
-        if os.path.exists(os.path.join(base_path, folder)):
+        if os.path.exists(os.path.join(args.project_dir, folder)):
             # Throw an error if the folder already exists
             raise Exception(f"Folder '{folder}' already exists in the current directory, please clean the directory before moving in new data...")
         # Check if the source folder exists
@@ -24,7 +23,7 @@ def copy_folders(source_dir):
     for folder in folders_to_copy:
         print(f"Copying folder '{folder}' from {source_dir} to the current directory.")
         # Copy the folder to the current directory
-        shutil.copytree(os.path.join(source_dir, folder), os.path.join(base_path, folder))
+        shutil.copytree(os.path.join(source_dir, folder), os.path.join(args.project_dir, folder))
         print(f"Copied folder '{folder}' from {source_dir} to the current directory.")
 
 # Function to list available folders in the storage path
@@ -99,4 +98,7 @@ def main():
 
 # Run the script
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    args = parser.parse_args()
     main()

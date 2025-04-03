@@ -59,9 +59,13 @@ if __name__ == '__main__':
     parser.add_argument('--masks_dir', default="", help="Will be set to project_dir/inputs/masks if exists and not set")
     
     # NOTE: Adding argument to control the different workflows
-    parser.add_argument('--calibration', type=str, default="sfm", help="Preprocessing workflow to execute. Options: sfm, cal_sfm, cal")
+    parser.add_argument('--calibration', type=str, default="sfm", help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
 
     args = parser.parse_args()
+
+    if args.calibration not in ["sfm", "cal_sfm"]:
+        print(f"Unknown calibration workflow {args.calibration}. Exiting.")
+        sys.exit(1)
     
     if args.images_dir == "":
         args.images_dir = os.path.join(args.project_dir, "inputs/images")
@@ -77,6 +81,7 @@ if __name__ == '__main__':
     setup_dirs(args.project_dir)
 
     if args.calibration == "sfm":
+        # PACOMMENT: NOTE: The original pipeline is not implemented yet to also make use of the test images (possibly implement it if it does not totally fail to map the images)
         ## Feature extraction, matching then mapper to generate the colmap.
         print("extracting features ...")
         colmap_feature_extractor_args = [
@@ -86,7 +91,7 @@ if __name__ == '__main__':
             "--ImageReader.single_camera", "1",
             "--ImageReader.default_focal_length_factor", "0.5",
             "--ImageReader.camera_model", "OPENCV",
-            "--SiftExtraction.max_num_features", "16384"
+            "--SiftExtraction.max_num_features", "16384" # PACOMMENT: Modifying this parameter from 8192 to 16384
             ]
         
         try:
@@ -149,6 +154,8 @@ if __name__ == '__main__':
     elif args.calibration == "cal_sfm":
     
         # The following is the pipeline when having the camera.bin and the images.bin already available and the points3D.bin empty
+        # These files can be prepared using the generate_colmap.py script
+        
         bundle_adj_colmap = f"{args.project_dir}/camera_calibration/unrectified/bundle_adjustment"
         if not os.path.exists(bundle_adj_colmap):
             os.makedirs(os.path.join(bundle_adj_colmap, "sparse"))
@@ -277,8 +284,6 @@ if __name__ == '__main__':
         os.makedirs(f"{args.project_dir}/camera_calibration/unrectified/sparse/initial")
         shutil.move(f"{args.project_dir}/camera_calibration/unrectified/sparse/0", f"{args.project_dir}/camera_calibration/unrectified/sparse/initial")
         shutil.copytree(f"{args.project_dir}/camera_calibration/unrectified/bundle_adjustment/sparse/0", f"{args.project_dir}/camera_calibration/unrectified/sparse/0")
-    elif args.calibration == "cal":
-        print("The camera calibration is already available. No need to run the SfM pipeline.")
     
     ## Undistort images
     print(f"undistorting images from {args.images_dir} to {args.project_dir}/camera_calibration/rectified images...")

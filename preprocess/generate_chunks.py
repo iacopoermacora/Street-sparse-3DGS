@@ -51,8 +51,14 @@ if __name__ == '__main__':
     parser.add_argument('--n_jobs', type=int, default=8, help="Run per chunk COLMAP in parallel on the same machine. Does not handle multi GPU systems. --use_slurm overrides this.")
 
     # NOTE: Adding argument to deal with already generated colmap
-    parser.add_argument('--calibration', type=str, default="sfm",  help="Preprocessing workflow to execute. Options: sfm, cal_sfm, cal")
+    parser.add_argument('--calibration', type=str, default="sfm",  help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
+    parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
+    parser.add_argument('--LiDAR_downsample_density', type=int, default=500, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
     args = parser.parse_args()
+
+    if args.calibration not in ["sfm", "cal_sfm"]:
+        print("calibration argument should be either sfm or cal_sfm. Exiting.")
+        sys.exit(1)
     
     images_dir, colmap_dir, chunks_dir = setup_dirs(
         args.images_dir,
@@ -70,6 +76,7 @@ if __name__ == '__main__':
     start_time = time.time()
 
     if args.calibration == "sfm":
+        # PACOMMENT: NOTE: It is not yet possible to have sfm calibration with LiDAR initialisation (possibly implement it if it does not fail totally to map the images)
         ## First create raw_chunks, each chunk has its own colmap.
         print(f"chunking colmap from {colmap_dir} to {args.chunks_dir}/raw_chunks")
         make_chunk_args = [
@@ -162,31 +169,16 @@ if __name__ == '__main__':
                 "--images_dir", f"{images_dir}",
                 "--output_path", f"{chunks_dir}/chunks",
             ]
+        if args.LiDAR_initialisation:
+            ss_make_chunk_args.append("--LiDAR_initialisation")
+
+        if args.LiDAR_downsample_density > 0:
+            ss_make_chunk_args.extend(["--LiDAR_downsample_density", str(args.LiDAR_downsample_density)])
         try:
             subprocess.run(ss_make_chunk_args, check=True)
         except subprocess.CalledProcessError as e:
             print(f"Error executing image_undistorter: {e}")
             sys.exit(1)
-    else:
-        print("HARDCODED FOR TEST PUROPOSES") # NOTE: To implement eventually
-
-        # Create chunk directory for chunk 0_0
-        os.makedirs(os.path.join(chunks_dir, "chunks", "0_0", "sparse"), exist_ok=True)
-
-        # Copy colmap files to chunk directory
-        subprocess.run([
-            "cp", "-r", os.path.join(colmap_dir, "sparse", "0"), os.path.join(chunks_dir, "chunks", "0_0", "sparse", "0")
-        ], check=True)
-
-        # Write center.txt file
-        with open(os.path.join(chunks_dir, "chunks", "0_0", "center.txt"), "w") as f:
-            f.write("-1.9267463684082031 -2.8752479553222656 0.0")
-
-        # Write extent.txt file
-        with open(os.path.join(chunks_dir, "chunks", "0_0", "extent.txt"), "w") as f:
-            f.write("100.0 100.0 2000000000000.0")
-
-        
 
     # create chunks.txt file that concatenates all chunks center.txt and extent.txt files
     try:
