@@ -67,8 +67,8 @@ def _ParseArgs():
                              'However, the caller needs to make sure that the output EPSG code matches the RDS results.')
     parser.add_argument('--selected_area', type=_DecodeProcessingAreaFromCommandLineArgument,
                         help='EWKT region description base64 encoded area')
-    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2, 4=FRLBU1U2')
     cf.io.AddFileSystemConfigFlag(parser)  # https://cyclomedia.atlassian.net/wiki/spaces/AIR/pages/399671359/cf+io+and+the+virtual+filesystem
     args = parser.parse_args()
     return args
@@ -137,6 +137,13 @@ def PrepareData(
             'r1': (270, 0), 'r2': (225, 0),
             'b1': (180, 0), 'b2': (135, 0),
             'l1': (90, 0), 'l2': (45, 0),
+            'u1': (270, 45), 'u2': (90, 45)
+        }
+    elif args.directions == '4':
+        face_names = ['f', 'r', 'l', 'b', 'u1', 'u2']
+        YAW_PITCH_LUT = { # PACOMMENT: modified
+            'f': (0, 0), 'r': (270, 0),
+            'l': (90, 0), 'b': (180, 0),
             'u1': (270, 45), 'u2': (90, 45)
         }
 

@@ -67,7 +67,7 @@ def _DownloadImagesForRegion(inventory_project_settings_file_path: str,
 
     logger.info('Start downloading images')
     cityfusion_subprocess.CheckOutputCityfusionPython(
-        'billboards_prepare_data',
+        'gaussians_prepare_data',
         [
             working_dir,
             '--recording_details_path',
@@ -111,8 +111,8 @@ def _ParseArguments():
     parser.add_argument('--date_from', type=cf.ValidateStringIsDate,
                         help='Ignore images recorded before this date')
     parser.add_argument('--date_till', type=cf.ValidateStringIsDateOrEmpty)
-    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2, 4=FRLBU1U2')
     arguments = parser.parse_args()
     if arguments.date_till and arguments.date_till <= arguments.date_from:
         parser.error('Please select a date_till which is later than date_from')

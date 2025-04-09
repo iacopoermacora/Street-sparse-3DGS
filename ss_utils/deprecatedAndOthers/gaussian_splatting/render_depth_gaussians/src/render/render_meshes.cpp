@@ -162,60 +162,6 @@ cv::Matx44f MakeViewMatx44f(const cv::Matx33f& camera_rotation, const cv::Point3
     return ToMatx44(R_t) * MakeTranslationMatx(-relative_camera_pos);
 }
 
-void TerrestrialMeshesRenderer::Render
-(
-    const cf::io::RecordingExtrinsics& tr,
-    const std::vector<std::shared_ptr<TerrestrialMesh> >& meshes,
-    cv::Mat cube_distance[6]
-)
-{
-    int width = kFaceSizei;
-    int height = kFaceSizei;
-
-    cv::Matx33f cam_rotation;
-    cf::io::RecordingSourceTraits<cf::io::RecordingSource::TERRESTRIAL>::OrientationConvention::GetCameraRotation(tr, &cam_rotation);
-
-    std::vector<cv::Matx44f> vs;
-    for (size_t i = 0; i < meshes.size(); ++i)
-    {
-        cv::Point3f t
-        (
-            static_cast<float>(tr.position.x - meshes[i]->mesh_offset.x),
-            static_cast<float>(tr.position.y - meshes[i]->mesh_offset.y),
-            static_cast<float>(tr.position.z - meshes[i]->mesh_offset.z)
-        );
-
-        vs.push_back(MakeViewMatx44f(cam_rotation, t));
-    }
-
-    // build a scene for rendering
-    RTCScene scene = rtcDeviceNewScene(device_, RTC_SCENE_STATIC | RTC_SCENE_COHERENT | RTC_SCENE_COMPACT, RTC_INTERSECT8);
-
-    std::vector<std::vector<bool>*> valid_triangle_index;
-    // Build the scene
-    for (size_t mesh_idx = 0; mesh_idx < meshes.size(); ++mesh_idx)
-    {
-        cv::Matx44f mv = vs[mesh_idx];
-        unsigned int instance = rtcNewInstance(scene, meshes[mesh_idx]->scene);
-        valid_triangle_index.push_back(&(meshes[mesh_idx]->valid_primitive));
-        rtcSetTransform(scene, instance, RTC_MATRIX_ROW_MAJOR, (float*)&mv.val[0]);
-    }
-
-    rtcCommit(scene);
-
-    cv::Vec3f directions[] = { cv::Vec3f(1.0f, 0.0f, 0.0f), cv::Vec3f(-1.0f, 0.0f, 0.0f), cv::Vec3f(0.0f, 1.0f, 0.0f), cv::Vec3f(0.0f, -1.0f, 0.0f), cv::Vec3f(0.0f, 0.0f, 1.0f), cv::Vec3f(0.0f, 0.0f, -1.0f) };
-
-    for (size_t face_idx = 0; face_idx < 6; ++face_idx)
-    {
-        cv::Matx33f dir = DirectionMatrix(directions[face_idx]);
-
-        cube_distance[face_idx].create(cv::Size(width, height), CV_32FC1);
-
-        RenderScene(device_, scene, dir, valid_triangle_index, &cube_distance[face_idx]);
-    }
-
-}
-
 cv::Vec3f combineMixedAngles(float angleInDegrees, float angleInRadians) {
     // Convert degrees to radians
     float angleInRadians1 = angleInDegrees * M_PI / 180.0f;
@@ -237,15 +183,15 @@ cv::Vec3f combineMixedAngles(float angleInDegrees, float angleInRadians) {
     return cv::Vec3f(x, y, 0);
 }
 
-void TerrestrialMeshesRenderer::Render10images
+void TerrestrialMeshesRenderer::Render
 (
     const cf::io::RecordingExtrinsics& tr,
     const std::vector<std::shared_ptr<TerrestrialMesh> >& meshes,
-    cv::Mat cube_distance[10],
-    float driving_direction
+    cv::Mat cube_distance[],
+    float driving_direction,
+    const std::string& directions_config = "3"  // Default to the 10-face configuration
 )
 {
-
     int width = kFaceSizei;
     int height = kFaceSizei;
 
@@ -280,18 +226,35 @@ void TerrestrialMeshesRenderer::Render10images
 
     rtcCommit(scene);
 
-    // Create a list of directions in degrees for the 10 faces. Starting from 0 (front) and moving 45 degrees clockwise
-    float directions[10] = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f, 45.0f, 225.0f};
+    // Define the number of faces and their directions based on the configuration
+    int num_faces = 10;  // Default
+    std::vector<float> directions;
+    
+    if (directions_config == "1") {  // F1R1B1L1 (4 faces)
+        num_faces = 4;
+        directions = {0.0f, 90.0f, 180.0f, 270.0f};  // Front, Right, Back, Left
+    } 
+    else if (directions_config == "2") {  // F1F2R1R2B1B2L1L2 (8 faces)
+        num_faces = 8;
+        directions = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f};  // Two each of Front, Right, Back, Left
+    }
+    else if (directions_config == "3") {  // F1F2R1R2B1B2L1L2U1U2 (10 faces)
+        num_faces = 10;
+        directions = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f, 45.0f, 225.0f};  // Original configuration
+    }
+    else if (directions_config == "4") {  // F1R1B1L1U1U2 (6 faces)
+        num_faces = 6;
+        directions = {0.0f, 90.0f, 180.0f, 270.0f, 45.0f, 225.0f};  // Front, Right, Back, Left, Up1, Up2
+    }
 
     driving_direction = driving_direction - tr.orientation.z;
-    // Create combined directions vector for the 10 faces
-    cv::Vec3f combined_directions[10];
-    for (int i = 0; i < 10; ++i) {
+    // Create combined directions vector for the faces
+    std::vector<cv::Vec3f> combined_directions(num_faces);
+    for (int i = 0; i < num_faces; ++i) {
         combined_directions[i] = combineMixedAngles(directions[i], driving_direction);
     }
 
-
-    for (size_t face_idx = 0; face_idx < 10; ++face_idx)
+    for (int face_idx = 0; face_idx < num_faces; ++face_idx)
     {
         cv::Matx33f dir = DirectionMatrix(combined_directions[face_idx]);
 
@@ -299,7 +262,6 @@ void TerrestrialMeshesRenderer::Render10images
 
         RenderScene(device_, scene, dir, valid_triangle_index, &cube_distance[face_idx]);
     }
-
 }
 
 } // namespace rdc

@@ -82,8 +82,8 @@ def _ParseArguments():
     parser.add_argument('--working_dir',
                         type=lambda value: cf.ValidateStringIsUrlOrExistingDirectory('working_dir', value),
                         help='Directory to write the images to. Should exist.'),
-    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2, 4=FRLBU1U2')
     arguments = parser.parse_args()
     return arguments
 

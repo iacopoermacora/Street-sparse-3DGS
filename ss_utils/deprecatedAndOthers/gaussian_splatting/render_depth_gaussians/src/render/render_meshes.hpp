@@ -31,15 +31,9 @@ public:
     (
         const cf::io::RecordingExtrinsics& tr,
         const std::vector<std::shared_ptr<TerrestrialMesh> >& meshes,
-        cv::Mat cube_distance[6]
-    );
-
-    void Render10images
-    (
-        const cf::io::RecordingExtrinsics& tr,
-        const std::vector<std::shared_ptr<TerrestrialMesh> >& meshes,
-        cv::Mat cube_distance[10],
-        float driving_direction = 0.0f
+        cv::Mat cube_distance[],
+        float driving_direction,
+        const std::string& directions_config = "3"
     );
 
 private:
