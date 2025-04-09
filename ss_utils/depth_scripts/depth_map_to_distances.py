@@ -1,3 +1,11 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script converts Cyclomedia-encoded depth maps to a format suitable 
+for 3D Gaussian Splatting as required by the Hierarchical Gaussian Splatting pipeline.
+'''
 import cv2
 import numpy as np
 import os
@@ -13,6 +21,15 @@ from read_write_model import *
 def convert_depth_map_to_meters(depth_image):
     """
     Convert Cyclomedia-encoded depth map to floating point distances in meters.
+    The depth map is encoded in a 3-channel BGR format, where the R and G channels
+    contain the depth information. The B channel is used to identify background pixels.
+
+    Args:
+        depth_image: Input depth image (BGR or grayscale).
+    
+    Returns:
+        depth_in_m_f: Depth in meters as a float32 array.
+        background_mask: Mask indicating background pixels (black).
     """
     # Extract the G and R channels
     if depth_image.ndim == 3:
@@ -42,6 +59,15 @@ def convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_d
     """
     Convert depth in meters to the inverse depth format used by 3D Gaussian Splatting.
     Preserves completely black pixels (background).
+
+    Args:
+        depth_in_meters: Depth in meters as a float32 array.
+        background_mask: Mask indicating background pixels (black).
+        min_depth: Minimum depth value to consider.
+        max_depth: Maximum depth value to consider.
+    
+    Returns:
+        depth_16bit: Converted depth map in 16-bit unsigned integer format.
     """
     # Create a mask for valid depth values (not background and above min_depth)
     valid_mask = (depth_in_meters > min_depth) & (~background_mask)
@@ -80,11 +106,21 @@ def read_colmap_data(images_bin_path, images_depths_bin_path=None):
     """
     Read COLMAP data using the read_write_model module.
     Returns a dictionary mapping image IDs to their data.
+
+    Args:
+        images_bin_path: Path to the images.bin file.
+        images_depths_bin_path: Path to the images_depths.bin file (optional).
+    
+    Returns:
+        images_data: Dictionary mapping image IDs to their data.
+        depth_image_ids: Set of image IDs that come from images_depths.bin
     """
     images_data = {}
+    depth_image_ids = set()  # Track which images come from images_depths.bin
     
     try:
         # Use read_model to read the data
+        max_id = 0
         if os.path.exists(images_bin_path):
             images = read_images_binary(images_bin_path)
             print(f"Read {len(images)} images from images.bin")
@@ -93,8 +129,9 @@ def read_colmap_data(images_bin_path, images_depths_bin_path=None):
             for image_id, image in images.items():
                 images_data[image_id] = {
                     'name': image.name,
-                    'camera_id': image.camera_id
+                    'camera_id': image.camera_id,
                 }
+                max_id = max(max_id, image_id)
         
         # Add depths data if provided
         if images_depths_bin_path and os.path.exists(images_depths_bin_path):
@@ -102,22 +139,32 @@ def read_colmap_data(images_bin_path, images_depths_bin_path=None):
             print(f"Read {len(depths_images)} images from images_depths.bin")
                 
             for image_id_depths, image_depths in depths_images.items():
-                images_data[image_id_depths+image_id+1] = {
+                # Ensure unique IDs by adding offset
+                new_id = image_id_depths + max_id + 1
+                images_data[new_id] = {
                     'name': image_depths.name,
-                    'camera_id': image_depths.camera_id
+                    'camera_id': image_depths.camera_id,
                 }
+                depth_image_ids.add(new_id)  # Add to depth image IDs set
     except Exception as e:
         print(f"Error reading COLMAP data: {e}")
         
-    return images_data
+    return images_data, depth_image_ids
+    
 
 def extract_image_info(original_filename):
     """
     Extract imageID and face information from the original filename.
     Original format: imageID_faceNumber_UppercaseFaceLetter_0_0.png
     e.g., WE931VUJ_1_B_0_0.png
+
+    Args:
+        original_filename: Original filename to extract information from.
     
-    Returns: imageID, faceNumber, faceLetter
+    Returns:
+        image_id: Extracted image ID.
+        face_number: Extracted face number.
+        face_letter: Extracted face letter.
     """
     parts = original_filename.split('_')
     if len(parts) >= 3:
@@ -133,14 +180,21 @@ def create_mapping_from_colmap(images_bin_path, images_depths_bin_path=None):
     Create a mapping from original filename pattern to COLMAP naming.
     Original format: imageID_faceNumber_UppercaseFaceLetter_0_0.png
     COLMAP format: camX/increasingNumber_imageID_lowercaseFaceLetterFaceNumber.jpg
-    
-    Returns a dictionary that maps (imageID, faceNumber, faceLetter) to COLMAP name
+
+    Args:
+        images_bin_path: Path to the images.bin file.
+        images_depths_bin_path: Path to the images_depths.bin file (optional).
+
+    Returns:
+        mapping: Dictionary mapping from original filenames to COLMAP filenames.
+        depth_filenames: Set of filenames that are depth images.
     """
     try:
-        colmap_images = read_colmap_data(images_bin_path, images_depths_bin_path)
+        colmap_images, depth_image_ids = read_colmap_data(images_bin_path, images_depths_bin_path)
         
         # Create mapping from original naming to COLMAP naming
         mapping = {}
+        depth_filenames = set()  # Track which filenames are depth images
         
         for image_id, data in colmap_images.items():
             colmap_name = data['name']
@@ -160,16 +214,27 @@ def create_mapping_from_colmap(images_bin_path, images_depths_bin_path=None):
                 
                 key = (image_id_colmap, face_number_colmap, face_letter_upper)
                 mapping[key] = colmap_name
+                
+                # If this is a depth image, add to the set of depth filenames
+                if image_id in depth_image_ids:
+                    depth_filenames.add(colmap_name)
         
-        return mapping
+        return mapping, depth_filenames
     except Exception as e:
         print(f"Error creating mapping: {e}")
-        return {}
+        return {}, set()
 
 def get_output_filename(original_filename, mapping):
     """
     Get the output filename for a depth map based on the original filename and the mapping.
     Changes extension from .jpg to .png for depth maps.
+
+    Args:
+        original_filename: Original filename to extract information from.
+        mapping: Dictionary mapping from original filenames to COLMAP filenames.
+    
+    Returns:
+        output_filename: Mapped filename for the depth map.
     """
     image_id, face_number, face_letter = extract_image_info(original_filename)
     
@@ -181,6 +246,20 @@ def get_output_filename(original_filename, mapping):
         print(f"Not present in mapping: {image_id}, {face_number}, {face_letter}")
     
     return None
+
+def create_white_mask(depth_image_shape):
+    """
+    Create a white mask image with the same shape as the depth image.
+    
+    Args:
+        depth_image_shape: Shape of the depth image.
+    
+    Returns:
+        white_mask: White mask image.
+    """
+    # Create a completely white image (all 255)
+    white_mask = np.ones(depth_image_shape[:2], dtype=np.uint8) * 255
+    return white_mask
 
 def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     """
@@ -194,8 +273,9 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     # Define paths
     colmap_images_bin = os.path.join(project_dir, "camera_calibration", "aligned", "sparse", "0", "images.bin")
     colmap_images_depths_bin = os.path.join(project_dir, "camera_calibration", "aligned", "sparse", "0", "images_depths.bin")
-    input_depth_dir = os.path.join(project_dir, "camera_calibration", "depth_files", "rgb_depths")  # Assuming this is where your original depth maps are
+    input_depth_dir = os.path.join(project_dir, "camera_calibration", "depth_files", "rgb_depths")
     output_depth_dir = os.path.join(project_dir, "camera_calibration", "rectified", "depths")
+    output_mask_dir = os.path.join(project_dir, "camera_calibration", "rectified", "masks")
     
     # Ensure input_depth_dir exists
     if not os.path.exists(input_depth_dir):
@@ -207,7 +287,7 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     
     # Create mapping from original filenames to COLMAP names
     try:
-        mapping = create_mapping_from_colmap(colmap_images_bin, colmap_images_depths_bin)
+        mapping, depth_filenames = create_mapping_from_colmap(colmap_images_bin, colmap_images_depths_bin)
         print(f"Created mapping for {len(mapping)} images")
     except Exception as e:
         print(f"Error reading COLMAP files: {e}")
@@ -220,10 +300,9 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     # Track processed files for reporting
     processed_files = 0
     skipped_files = 0
+    white_masks_created = 0
     
     for i, filename in enumerate(input_files):
-        print(f"Processing {i+1}/{len(input_files)}: {filename}")
-        
         # Get the output filename based on COLMAP naming
         output_filename = get_output_filename(filename, mapping)
         if output_filename is None:
@@ -254,16 +333,38 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
         # Save the converted depth map
         output_path = os.path.join(output_depth_dir, output_filename)
         cv2.imwrite(output_path, depth_16bit)
+
+        # If this image comes from images_depths.bin, create and save a white mask
+        # Check if the COLMAP jpg name (before extension change) is in the depth_filenames set
+        colmap_jpg_name = output_filename.replace('.png', '.jpg')
+        if colmap_jpg_name in depth_filenames and os.path.exists(output_mask_dir):
+            # Create white mask with same dimensions as depth image
+            white_mask = create_white_mask(depth_image.shape)
+            
+            # Create mask directory structure
+            mask_cam_dir = os.path.join(output_mask_dir, cam_dir)
+            os.makedirs(mask_cam_dir, exist_ok=True)
+            
+            # Save white mask with same filename (but in masks directory)
+            mask_path = os.path.join(output_mask_dir, output_filename)
+            cv2.imwrite(mask_path, white_mask)
+            white_masks_created += 1
         
         processed_files += 1
-        print(f"  Saved to {output_path}")
     
     print(f"Processed {processed_files} depth maps, skipped {skipped_files} depth maps")
+    print(f"Created {white_masks_created} white masks (for depth only images)")
 
 def find_chunks(project_dir):
     """
     Find all chunks in the project directory.
     Returns a list of chunk directories.
+
+    Args:
+        project_dir: Root project directory
+    
+    Returns:
+        List of chunk directories
     """
     chunks_dir = os.path.join(project_dir, "camera_calibration", "chunks")
     if not os.path.exists(chunks_dir):
@@ -285,6 +386,9 @@ def create_depth_params_json_for_chunk(chunk_dir):
     
     Args:
         chunk_dir: Path to the chunk directory
+    
+    Returns:
+        Number of entries in the created depth_params.json file
     """
     sparse_dir = os.path.join(chunk_dir, "sparse", "0")
     images_bin_path = os.path.join(sparse_dir, "images.bin")
@@ -296,7 +400,7 @@ def create_depth_params_json_for_chunk(chunk_dir):
     
     # Read image data from both COLMAP files
     try:
-        image_data = read_colmap_data(images_bin_path, images_depths_bin_path)
+        image_data, _ = read_colmap_data(images_bin_path, images_depths_bin_path)
     except Exception as e:
         print(f"Error reading COLMAP data for chunk {os.path.basename(chunk_dir)}: {e}")
         return 0

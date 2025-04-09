@@ -1,3 +1,14 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script processes images using a pre-trained Mask R-CNN model to generate
+masks for moving objects in the images. Based on flask, it provides a web interface for
+user confirmation of masks. The script also handles the saving of masks and images in the
+appropriate directories.
+'''
+
 import os
 from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for, session
 from PIL import Image
@@ -15,12 +26,13 @@ parser.add_argument('--project_dir', type=str, required=True, help="Path to the 
 args = parser.parse_args()
 
 # Flask app
-app = Flask(__name__)
+app = Flask(__name__, template_folder=f"{args.project_dir}/ss_utils/mask_utils/templates",)
 app.secret_key = 'your_secret_key'  # Required for session management
 
 # Constants
 INPUT_DIR = f"{args.project_dir}/inputs/images" # Used to be /ss_utils/static/images
 OUTPUT_DIR = f"{args.project_dir}/inputs/masks"
+MANUAL_MASKS_DIR = f"{args.project_dir}/ss_utils/mask_utils/manual_masks"
 
 # List of images and masks
 images_path = []
@@ -35,8 +47,15 @@ model = torchvision.models.detection.maskrcnn_resnet50_fpn(pretrained=True).eval
 # Image transforms
 transform = T.Compose([T.ToTensor()])
 
-# Helper to get mask predictions with confidence threshold, keeping the original structure
 def get_mask(image_path, confidence_threshold=0.5):
+    """
+    Get the mask for the given image using the pre-trained Mask R-CNN model.
+    Args:
+        image_path (str): Path to the input image.
+        confidence_threshold (float): Confidence threshold for filtering predictions.
+    Returns:
+        prediction (list): List of predictions containing masks, labels, and scores.
+    """
     image = Image.open(image_path).convert("RGB")
     tensor = transform(image)
     with torch.no_grad():
@@ -51,8 +70,14 @@ def get_mask(image_path, confidence_threshold=0.5):
 
     return prediction
 
-# Save mask as PNG with white background and black mask
 def save_mask(mask_array, output_path, image_path):
+    """
+    Save the mask as a PNG file.
+    Args:
+        mask_array (numpy.ndarray): Mask array to save.
+        output_path (str): Path to save the mask image.
+        image_path (str): Path to the original image.
+    """
     # If the mask is empty, create a white image with the same size as the original image
     if mask_array is None:
         print(f'Saving empty mask for {image_path}')
@@ -62,10 +87,10 @@ def save_mask(mask_array, output_path, image_path):
     # Check face of the image from image_path 
     face = image_path.split('/')[-1].split('.')[0].split('_')[-1]
     print(f'Checking for additional mask for face {face}')
-    if os.path.exists(f'{args.project_dir}/ss_utils/manual_masks/manual_mask_{face}.jpg'):
+    if os.path.exists(f'{MANUAL_MASKS_DIR}/manual_mask_{face}.jpg'):
         print('Applying additional mask')
         # Load the additional mask
-        additional_mask = cv2.imread(f'{args.project_dir}/ss_utils/manual_masks/manual_mask_{face}.jpg', cv2.IMREAD_GRAYSCALE)
+        additional_mask = cv2.imread(f'{MANUAL_MASKS_DIR}/manual_mask_{face}.jpg', cv2.IMREAD_GRAYSCALE)
 
         # Make sure that the mask is binary (0 or 255)
         additional_mask = (additional_mask > 0).astype(np.uint8)
@@ -92,6 +117,16 @@ def save_mask(mask_array, output_path, image_path):
 
 # Detect and process an image
 def detect_and_process(image_path, output_path):
+    """
+    Detect and process the image to generate masks.
+    Args:
+        image_path (str): Path to the input image.
+        output_path (str): Path to save the mask image.
+    Returns:
+        combined_mask (numpy.ndarray): Combined mask for the detected objects.
+        masks_to_confirm (list): List of masks to confirm.
+        masks_to_confirm_name (list): List of names for the masks to confirm.
+    """
     prediction = get_mask(image_path)
     coco_ids_automatic = [1, 16, 18]  # IDs for person and animals (dog, cat)
     coco_ids_confirmation = [2, 3, 4, 6, 7, 8]  # bycicle, car, motorcycle, bus, train, truck
@@ -141,6 +176,15 @@ def detect_and_process(image_path, output_path):
     return combined_mask, masks_to_confirm, masks_to_confirm_name
 
 def superimpose_mask_on_image(image_path, mask_array, opacity=0.3):
+    """
+    Superimpose the mask on the original image with a specified opacity.
+    Args:
+        image_path (str): Path to the original image.
+        mask_array (numpy.ndarray): Mask array to superimpose.
+        opacity (float): Opacity of the mask overlay.
+    Returns:
+        str: Base64 encoded image with the mask superimposed.
+    """
     # Load the original image
     original_image = Image.open(image_path).convert("RGBA")
 
@@ -165,6 +209,9 @@ def superimpose_mask_on_image(image_path, mask_array, opacity=0.3):
 
 @app.route('/')
 def index():
+    """
+    Index page to initialize the session and redirect to the process_item page.
+    """
     print('Index page')
     # Initialize the loop index if not already in session
     if 'loop_images' not in session:
@@ -176,6 +223,9 @@ def index():
 
 @app.route('/process_item', methods=['GET', 'POST'])
 def process_item():
+    """
+    Process the current image and handle user confirmation for masks.
+    """
     loop_index = session['loop_index']
     loop_confirmations = session['loop_confirmations']
 
@@ -250,22 +300,36 @@ def process_item():
 
 @app.route('/final_page')
 def final_page():
+    """
+    Final page to display after all images have been processed.
+    """
     return render_template('final_page.html')
 
 # Serve images from the inputs folder
 @app.route('/images/<path:filename>')
 def serve_image(filename):
-    return send_from_directory(f'{args.project_dir}/inputs/images', filename)
+    """
+    Serve images from the inputs folder.
+    Args:
+        filename (str): Name of the image file.
+    Returns:
+        Response: Image file response.
+    """
+    return send_from_directory(INPUT_DIR, filename)
 
 # Process all images
 def process_all_images():
+    """
+    Process all images in the input directory and prepare them for the web interface.
+    """
     print('I am processing all images')
     for root, _, files in os.walk(INPUT_DIR):
         for file in files:
             if file.endswith(".jpg"):
                 print(f'Processing {file}')
                 image_path = os.path.join(root, file)
-                mask_path = image_path.replace(INPUT_DIR, OUTPUT_DIR)
+                relative_path = os.path.relpath(image_path, INPUT_DIR)
+                mask_path = os.path.join(OUTPUT_DIR, relative_path)
                 images_path.append(image_path)
                 masks_path.append(mask_path)
 

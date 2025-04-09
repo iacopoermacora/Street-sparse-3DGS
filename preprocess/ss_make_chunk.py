@@ -1,3 +1,13 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script is used to create chunks of the 3D model from the COLMAP sparse 
+reconstruction. It reads the COLMAP sparse reconstruction and LiDAR data, and creates chunks 
+of the model based on the given parameters.
+'''
+
 #
 # Copyright (C) 2024, Inria
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
@@ -8,8 +18,6 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
-# SS_MAKE_CHUNK
 
 import numpy as np
 import argparse

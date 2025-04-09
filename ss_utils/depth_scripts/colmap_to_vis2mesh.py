@@ -1,4 +1,11 @@
-#!/usr/bin/env python3
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script converts COLMAP binary model files (cameras.bin, images.bin) to
+a custom JSON format required by vis2mesh.
+'''
 import os
 import json
 import numpy as np
@@ -42,17 +49,6 @@ def add_item(image, cameras, output):
     }
     output["imgs"].append(entry)
 
-    # Add a second entry with the camera center shifted 1.5 meters higher in space
-    C_higher = [C[0], C[1] + 1.5, C[2]]  # Add 1.5 meters to the Y-coordinate
-    entry_higher = {
-        "C": C_higher,
-        "K": K,
-        "R": R.tolist(),
-        "width": camera.width,
-        "height": camera.height
-    }
-    output["imgs"].append(entry_higher)
-
 def convert_colmap_bin_to_json(model_dir, output_file):
     """
     Reads COLMAP binary model files from model_dir (expecting cameras.bin and images.bin)
@@ -65,9 +61,9 @@ def convert_colmap_bin_to_json(model_dir, output_file):
       - "width" and "height": from the camera model.
     """
     cameras_path = os.path.join(model_dir, "cameras.bin")
-    # Add both images from images.bin and images_depth.bin
+    # Add both images from images.bin and images_depths.bin
     images_path = os.path.join(model_dir, "images.bin")
-    images_depth_path = os.path.join(model_dir, "images_depth.bin")
+    images_depth_path = os.path.join(model_dir, "images_depths.bin")
     
     # Read the binary model files using COLMAP's provided functions.
     cameras = read_cameras_binary(cameras_path)
@@ -75,14 +71,25 @@ def convert_colmap_bin_to_json(model_dir, output_file):
     images_depth = read_images_binary(images_depth_path)
     
     output = {"imgs": []}
+
+    # List of accepted faces
+    accepted_faces = ["f", "l", "r", "b", "f1", "l1", "r1", "b1", "u1", "u2"]
     
     # Process images
     for image_id, image in images.items():
-        add_item(image, cameras, output)
+        # Check if the image has a valid face
+        # Extract the face name from the image name
+        face_name = image.name.split("_")[-1].split(".")[0]
+        if face_name in accepted_faces:
+            add_item(image, cameras, output)
     
     # Process images_depth
     for image_id, image in images_depth.items():
-        add_item(image, cameras, output)
+        # Check if the image has a valid face
+        # Extract the face name from the image name
+        face_name = image.name.split("_")[-1].split(".")[0]
+        if face_name in accepted_faces:
+            add_item(image, cameras, output)
 
     if not os.path.exists(os.path.dirname(output_file)):
         os.makedirs(os.path.dirname(output_file))

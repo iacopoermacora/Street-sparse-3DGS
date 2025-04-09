@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mask Confirmation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #2c3e50;
+            font-size: 2rem;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 1rem;
+        }
+        
+        .image-container {
+            display: flex;
+            justify-content: center;
+            align-items: stretch;
+            gap: 2rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        
+        .image-box {
+            flex: 1;
+            min-width: 300px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            transition: transform 0.3s ease;
+        }
+        
+        .image-box:hover {
+            transform: translateY(-5px);
+        }
+        
+        .image-box h2 {
+            color: #3498db;
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+        
+        .image-box img {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            display: block;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .button-container {
+            display: flex;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        
+        button {
+            padding: 0.8rem 2rem;
+            font-size: 1.1rem;
+            border-radius: 50px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            min-width: 150px;
+        }
+        
+        #confirm-btn {
+            background-color: #2ecc71;
+            color: white;
+        }
+        
+        #confirm-btn:hover {
+            background-color: #27ae60;
+            transform: scale(1.05);
+        }
+        
+        #deny-btn {
+            background-color: #e74c3c;
+            color: white;
+        }
+        
+        #deny-btn:hover {
+            background-color: #c0392b;
+            transform: scale(1.05);
+        }
+        
+        .keyboard-hint {
+            text-align: center;
+            color: #7f8c8d;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .key {
+            background-color: #ecf0f1;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #bdc3c7;
+            font-weight: bold;
+        }
+        
+        @media (max-width: 768px) {
+            .image-container {
+                flex-direction: column;
+            }
+            
+            .button-container {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            button {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+    
+    <script>
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'y') {
+                document.getElementById('confirm-btn').click();
+            } else if (event.key === 'n') {
+                document.getElementById('deny-btn').click();
+            }
+        });
+    </script>
+</head>
+<body>
+    <h1>Confirm the Mask for the Image</h1>
+    
+    <div class="image-container">
+        <div class="image-box">
+            <h2>Original Image</h2>
+            <img src="images/{{ image }}" alt="Original Image">
+        </div>
+        
+        <div class="image-box">
+            <h2>Proposed Mask for a {{ mask_to_confirm_name }}</h2>
+            <img src="{{ mask }}" alt="Mask Image">
+        </div>
+    </div>
+    
+    <form method="POST">
+        <div class="button-container">
+            <button type="submit" name="choice" value="confirm" id="confirm-btn">Confirm</button>
+            <button type="submit" name="choice" value="deny" id="deny-btn">Deny</button>
+        </div>
+        <div class="keyboard-hint">
+            Keyboard shortcuts: Press <span class="key">Y</span> to confirm or <span class="key">N</span> to deny
+        </div>
+    </form>
+</body>
+</html>

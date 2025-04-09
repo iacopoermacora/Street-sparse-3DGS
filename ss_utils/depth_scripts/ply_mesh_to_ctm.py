@@ -1,10 +1,17 @@
-#!/usr/bin/env python3
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script converts a PLY mesh into CTM meshes split into grid cells 
+(as required by the Cyclomedia pipeline) using the OpenCTM C++ library.
+'''
 import argparse
 import os
 import numpy as np
 import trimesh
 from collections import defaultdict
-import ctm_exporter  # Import the C++ module built above
+import ctm_exporter  # Import the C++ module built
 from tqdm import tqdm
 import json
 
@@ -12,7 +19,7 @@ def save_ctm(filename, vertices, triangles):
     """
     Save the mesh to a CTM file using the ctm_exporter C++ module.
     
-    Parameters:
+    Args:
       - filename: output file path
       - vertices: (n,3) numpy array of float32 vertices
       - triangles: (m,3) numpy array of uint32 triangle indices

@@ -10,9 +10,6 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 
 # Install requirements
 pip install -r /host/requirements.txt
-echo "Installing requirements for mast3r and dust3r"
-pip install -r /host/mast3r/requirements.txt
-pip install -r /host/mast3r/dust3r/requirements.txt
 
 # Install any additional Python packages if they weren't already installed in the Dockerfile
 pip install cython # Required for mast3r_sfm
@@ -24,9 +21,9 @@ pip install pybind11 # Required for building the CTM exporter
 echo "Requirements installed"
 
 # Create setup.py in the ss_utils directory for building the CTM exporter
-if [ -f "/host/ss_utils/ctm_exporter.cpp" ] && [ ! -f "/host/ss_utils/setup.py" ]; then
+if [ -f "/host/ss_utils/depth_scripts/ctm_exporter/ctm_exporter.cpp" ] && [ ! -f "/host/ss_utils/depth_scripts/ctm_exporter/setup.py" ]; then
     echo "Creating setup.py for ctm_exporter in ss_utils folder"
-    cat > /host/ss_utils/setup.py << 'EOL'
+    cat > /host/ss_utils/depth_scripts/ctm_exporter/setup.py << 'EOL'
 from setuptools import setup, Extension
 import pybind11
 
@@ -49,7 +46,7 @@ fi
 
 # Build and install the CTM exporter module
 echo "Building CTM exporter module"
-cd /host/ss_utils && python setup.py build_ext --inplace && python setup.py install --user
+cd /host/ss_utils/depth_scripts/ctm_exporter && python setup.py build_ext --inplace && python setup.py install --user
 
 cd /host
 

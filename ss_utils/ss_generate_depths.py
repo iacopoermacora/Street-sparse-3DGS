@@ -1,3 +1,14 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: 
+This script generates depth maps from a COLMAP model using multiple steps.
+Vis2mesh is used to generate the mesh from the COLMAP model.
+The rest of the pipeline is used to convert the mesh to a custom format and render depth maps following the cyclomedia pipeline. 
+'''
+
 import subprocess
 import os
 import sys
@@ -9,7 +20,7 @@ import time
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True)
-    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
     args = parser.parse_args()
 
     # Prompt the user to prevent execution of the script if not in a x server environment
@@ -35,7 +46,7 @@ if __name__ == "__main__":
     # If the augmented recording details file already exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images", "recording_details_augmented.json")):
         augment_recording_details = [
-                    "python", f"ss_utils/augment_recording_details.py",
+                    "python", f"ss_utils/depth_scripts/augment_recording_details.py",
                     "--project_dir", args.project_dir,
                     "--directions", args.directions
                 ]
@@ -59,7 +70,7 @@ if __name__ == "__main__":
     # If the json file already exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "camera_calibration", "depth_files", "vis2mesh", "total.ply_WORK", "cam0.json")):
         colmap_to_vis2mesh_args = [
-                    "python", f"ss_utils/colmap_to_vis2mesh.py",
+                    "python", f"ss_utils/depth_scripts/colmap_to_vis2mesh.py",
                     "--model_dir", os.path.join(args.project_dir, "camera_calibration", "aligned", "sparse", "0"),
                     "--output_file", os.path.join(args.project_dir, "camera_calibration", "depth_files", "vis2mesh", "total.ply_WORK", "cam0.json"),
                 ]
@@ -148,7 +159,7 @@ if __name__ == "__main__":
     # If the ctm folder exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "camera_calibration", "depth_files", "ctm_meshes")):
         ply_mesh_to_ctm = [
-                    "python", f"ss_utils/ply_mesh_to_ctm.py",
+                    "python", f"ss_utils/depth_scripts/ply_mesh_to_ctm.py",
                     "--project_dir", args.project_dir,
                     "--input_ply", os.path.join(args.project_dir, "camera_calibration", "depth_files", "vis2mesh", "total_vis2mesh.ply"),
                     "--output_dir", os.path.join(args.project_dir, "camera_calibration", "depth_files", "ctm_meshes"),
@@ -172,6 +183,9 @@ if __name__ == "__main__":
     start_time = time.time()
 
     cityfusion_master_path = os.environ.get('CITYFUSION_MASTER_PATH')
+
+    # Change the permissions of the depth_files folder
+    os.chmod(os.path.join(args.project_dir, "camera_calibration", "depth_files"), 0o777)
 
     # If the stations file already exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "camera_calibration", "depth_files", "total.stations")):
@@ -201,6 +215,8 @@ if __name__ == "__main__":
 
     # Call the script to render the depth maps
 
+    sys.exit(0)
+
     print("#"*30)
     print("Step 6/7: Rendering the depth maps")
     print("#"*30)
@@ -208,7 +224,7 @@ if __name__ == "__main__":
     # Get the time before the script starts
     start_time = time.time()
 
-    if not os.path.exists(os.path.join(args.project_dir, "camera_calibration/depth_files/rgb_depths")):
+    if os.path.exists(os.path.join(args.project_dir, "camera_calibration", "depth_files", "total.stations")) and not os.path.exists(os.path.join(args.project_dir, "camera_calibration/depth_files/rgb_depths")):
         os.makedirs(os.path.join(args.project_dir, "camera_calibration/depth_files/rgb_depths"))
         os.chmod(os.path.join(args.project_dir, "camera_calibration/depth_files/rgb_depths"), 0o777)
 
@@ -250,7 +266,7 @@ if __name__ == "__main__":
     # If the depth folder already exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "camera_calibration/rectified/depth")):
         depth_map_to_distances = [
-            "python", f"ss_utils/depth_map_to_distances.py",
+            "python", f"ss_utils/depth_scripts/depth_map_to_distances.py",
             "--project_dir", args.project_dir
         ]
 

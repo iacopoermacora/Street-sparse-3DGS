@@ -1,3 +1,14 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script processes images from a JSON file, sorts them by timestamp,
+copies them to a new directory, renames them, and updates their EXIF data with GPS coordinates.
+This script is designed to work with images from a cyclomedia dataset and may require adjustments
+for different datasets or directory structures.
+'''
+
 import os
 from pyproj import Transformer
 import shutil
@@ -10,8 +21,15 @@ from fractions import Fraction
 from tqdm import tqdm
 import argparse
 
-# Step 1: Parse JSON to get image info and timestamps
 def parse_json(json_file):
+    """Parse the JSON file to extract image information
+    
+    Args:
+        json_file (str): Path to the JSON file containing image metadata.
+    
+    Returns:
+        dict: A dictionary containing image IDs and their corresponding metadata.
+    """
 
     print("Reading recording details...")
 
@@ -31,9 +49,14 @@ def parse_json(json_file):
     
     return image_info
 
-# Step 2: Sort images based on timestamp
 def sort_images_by_time(image_info):
-
+    """Sort images by timestamp
+    Args:
+        image_info (dict): Dictionary containing image IDs and their metadata.
+    
+    Returns:
+        list: A sorted list of tuples containing image IDs and their metadata.
+    """
     print("Sorting images...")
 
     sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
@@ -41,6 +64,12 @@ def sort_images_by_time(image_info):
 
 # Step 4: Copy and rename images
 def copy_and_rename_images(images, raw_image_input, directions):
+    """Copy and rename images based on their metadata
+    Args:
+        images (list): List of tuples containing image IDs and their metadata.
+        raw_image_input (str): Path to the raw image input directory.
+        directions (str): Camera directions to be used for renaming.
+    """
 
     print("Copying images and converting GPS coordinates")
 
@@ -76,7 +105,14 @@ def copy_and_rename_images(images, raw_image_input, directions):
             update_exif(os.path.join(cam_folder, new_name), x, y)
 
 def convert_to_dms(decimal_degrees):
-    """Convert decimal degrees to degrees, minutes, seconds format"""
+    """Convert decimal degrees to degrees, minutes, seconds format
+    
+    Args:
+        decimal_degrees (float): Decimal degrees to convert.
+        
+    Returns:
+        tuple: A tuple containing degrees, minutes, and seconds as fractions.
+    """
     degrees = int(decimal_degrees)
     minutes = int((decimal_degrees - degrees) * 60)
     seconds = ((decimal_degrees - degrees) * 60 - minutes) * 60
@@ -89,13 +125,26 @@ def convert_to_dms(decimal_degrees):
     return degrees, minutes, seconds
 
 def convert_coordinates(x, y):
-    """Convert RD (Dutch) coordinates to WGS84"""
+    """Convert RD (Dutch) coordinates to WGS84
+    Args:
+        x (float): RD x-coordinate.
+        y (float): RD y-coordinate.
+    
+    Returns:
+        tuple: Latitude and longitude in WGS84 format.
+    """
     transformer = Transformer.from_crs("EPSG:28992", "EPSG:4326")
     lat, lon = transformer.transform(y, x)
     return lat, lon
 
 def update_exif(image_path, x, y):
-    """Add GPS information to image EXIF data"""
+    """Add GPS information to image EXIF data
+    
+    Args:
+        image_path (str): Path to the image file.
+        x (float): Longitude coordinate.
+        y (float): Latitude coordinate.
+    """
 
     # Convert coordinates to WGS84
     lat, lon = convert_coordinates(x, y)
@@ -127,6 +176,7 @@ def update_exif(image_path, x, y):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    parser.add_argument('--directions', type=str, default="3", help="Camera directions: 1=Front, Right, Back, Left; 2=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2; 3=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2, Up1, Up2")
     args = parser.parse_args()
 
     raw_input = f"{args.project_dir}/ss_raw_images"
@@ -134,22 +184,14 @@ if __name__ == "__main__":
     json_file = os.path.join(raw_input, "recording_details_train_test.json")
     image_info = parse_json(json_file)
     sorted_images = sort_images_by_time(image_info)
-    choice = 0
-    # Ask the user to choose the directions
-    while choice not in ["1", "2", "3"]:
-        print("Choose the directions you want to use:")
-        print("1. Front, Right, Back, Left")
-        print("2. Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2")
-        print("3. Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2, Up1, Up2")
-        choice = input("Enter your choice: ")
-        # Define the directions \
-        if choice == "1":
-            directions = ['f', 'r', 'b', 'l']
-        elif choice == "2":
-            directions = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
-        elif choice == "3":
-            directions = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
-        else:
-            print("Invalid choice. Please try again.")
-    copy_and_rename_images(sorted_images, raw_image_input, directions)
+
+    if args.directions == "1":
+        face_directions = ["f", "r", "b", "l"]
+    elif args.directions == "2":
+        face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2"]
+    elif args.directions == "3":
+        face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2", "u1", "u2"]
+
+
+    copy_and_rename_images(sorted_images, raw_image_input, face_directions)
 

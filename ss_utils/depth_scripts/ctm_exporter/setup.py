@@ -1,3 +1,11 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script sets up the CTM exporter module using pybind11 and setuptools.
+'''
+
 from setuptools import setup, Extension
 import pybind11
 

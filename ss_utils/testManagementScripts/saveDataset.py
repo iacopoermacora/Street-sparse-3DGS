@@ -1,3 +1,12 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script is used to save a dataset by copying specific folders from the project 
+directory to a new location.
+'''
+
 import os
 import shutil
 import datetime
@@ -34,30 +43,49 @@ def change_permissions_recursively(path):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-# Function to prompt user for input
-def get_user_input():
+def get_loc_and_desc():
+    """
+    Get user input for location name and description of the dataset.
+
+    Returns:
+        tuple: A tuple containing the location name and description.
+    """
     location_name = input("Enter the location name: ")
     description = input("Enter a short description of the dataset: ")
     return location_name, description
 
-# Function to list available folders in the storage path
-def list_folders(storage_path):
-    # Get a list of directories in the storage path
+def list_folders(path):
+    """
+    List all directories in the specified path.
+
+    Args:
+        path (str): The path to list directories from.
+    
+    Returns:
+        list: A list of directory names in the specified path.
+    """
     try:
-        folders = [f for f in os.listdir(storage_path) if os.path.isdir(os.path.join(storage_path, f))]
+        folders = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
         if not folders:
-            print(f"No folders found in {storage_path}.")
+            print(f"No folders found in {path}.")
         return folders
     except FileNotFoundError:
-        print(f"The path '{storage_path}' does not exist.")
+        print(f"The path '{path}' does not exist.")
         return []
     
-# Function to copy folders and create the new structure
-def copy_folders(location_name, description, storage_path):
+def copy_folders(location_name, description, path):
+    """
+    Copy specific folders from the project directory to a new location.
+
+    Args:
+        location_name (str): The name of the new location.
+        description (str): A description of the dataset.
+        path (str): The path where the new folder will be created.
+    """
     # Get today's date in the format YYYYMMDD
     today_date = datetime.datetime.today().strftime('%Y%m%d')
 
-    new_folder = os.path.join(storage_path, location_name)
+    new_folder = os.path.join(path, location_name)
     dataset_folder = os.path.join(new_folder, "Dataset")
     
     # Define the list of folders to copy
@@ -89,13 +117,11 @@ def copy_folders(location_name, description, storage_path):
         f.write(f"Dataset description: {description}\n")
     print(f"Description written to {info_file_path}")
     
-# Main function to run the script
 def main():
-    location_name, description = get_user_input()
-    storage_path = "/media/raid_1/iermacora/Street-sparse-3DGS_outputs"
+    location_name, description = get_loc_and_desc()
 
-    if not os.path.exists(os.path.join(storage_path, location_name)):
-        copy_folders(location_name, description, storage_path)
+    if not os.path.exists(os.path.join(args.storage_path, location_name)):
+        copy_folders(location_name, description, args.storage_path)
     else:
         print(f"Error: folder '{location_name}' already exists in the storage path, please choose a different name.")
 
@@ -103,5 +129,6 @@ def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+    parser.add_argument('--storage_path', type=str, default="/media/raid_1/iermacora/Street-sparse-3DGS_outputs/", help="Path to the storage directory")
     args = parser.parse_args()
     main()

@@ -32,6 +32,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
     first_iter = 0
     prepare_output_and_logger(dataset)
     if dataset.gt_point_cloud_constraints: # PACOMMENT: added this differentiation
+        print("Loading GT point cloud")
         gaussians = GaussianModel(dataset.sh_degree, f"{dataset.source_path}/chunk.ply")
     else:
         gaussians = GaussianModel(dataset.sh_degree)
@@ -184,13 +185,11 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                             print("-----------------RESET OPACITY!-------------")
                             gaussians.reset_opacity()
 
-                    # if is_depth_only: # PACOMMENT: Added this block
-                    #     if gaussians._features_dc.grad is not None:
-                    #         gaussians._features_dc.grad.zero_()
-                    #     if gaussians._features_rest.grad is not None:
-                    #         gaussians._features_rest.grad.zero_()
-                    #     if gaussians._opacity.grad is not None:
-                    #         gaussians._opacity.grad.zero_()
+                    if is_depth_only: # PACOMMENT: Added this block
+                        if gaussians._features_dc.grad is not None:
+                            gaussians._features_dc.grad.zero_()
+                        if gaussians._features_rest.grad is not None:
+                            gaussians._features_rest.grad.zero_()
 
                     # Optimizer step
                     if iteration < opt.iterations:

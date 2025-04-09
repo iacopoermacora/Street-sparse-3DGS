@@ -1,3 +1,14 @@
+'''
+Thesis Project: Street-sparse-3DGS
+Author: Iacopo Ermacora
+Date: 11/2024-06/2025
+
+Description: This script augments the recording details of a dataset by interpolating 
+between existing recordings. It generates new recordings based on the distance between
+existing ones, and creates new COLMAP images for augmented data. The script also handles
+the reading and writing of COLMAP model files, including images and their parameters.
+'''
+
 import json
 import math
 import random
@@ -9,14 +20,27 @@ import argparse
 from tqdm import tqdm
 import sys
 import shutil
-from read_write_model import Image, write_images_binary, read_model
+from read_write_model import Image, write_images_binary, read_model, rotmat2qvec
 
 def calculate_distance(x1, y1, x2, y2):
-    """Calculate the Euclidean distance between two points."""
+    """Calculate the Euclidean distance between two points.
+    Args:
+        x1, y1: Coordinates of the first point.
+        x2, y2: Coordinates of the second point.
+    Returns:
+        The Euclidean distance between the two points.
+    """
     return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
 def generate_unique_image_name(all_image_names):
-    """Generate a random 8-character alphanumeric ImageId that doesn't exist in all_image_names."""
+    """Generate a random 8-character alphanumeric ImageId that doesn't exist in all_image_names.
+    
+    Args:
+        all_image_names (set): Set of existing image names to avoid duplicates.
+    
+    Returns:
+        str: A unique 8-character alphanumeric ImageId.
+    """
     while True:
         # Generate a string with pattern: 2 letters + 4 digits + 2 letters
         new_id = ''.join([
@@ -27,11 +51,21 @@ def generate_unique_image_name(all_image_names):
             random.choice(string.ascii_uppercase) for _ in range(2)
         ])
         
+        # Check if the generated ID is unique
+        # If it is not in the set of existing image names, return it
+        # If it is in the set, generate a new one
         if new_id not in all_image_names:
             return new_id
 
 def read_colmap_model(colmap_path):
-    """Read COLMAP model using read_write_model functions."""
+    """Read COLMAP model using read_write_model functions.
+    
+    Args:
+        colmap_path (str): Path to the COLMAP model directory.
+    
+    Returns:
+        tuple: A tuple containing cameras, images, and points3D.
+    """
     try:
         # Read the COLMAP model
         cameras, images, points3D = read_model(colmap_path, ext='.bin')
@@ -43,11 +77,19 @@ def read_colmap_model(colmap_path):
         sys.exit(1)
 
 def extract_image_names_from_colmap(images):
-    """Extract Image names from COLMAP image names."""
+    """Extract Image names from COLMAP image names.
+    
+    Args:
+        images (dict): Dictionary of COLMAP images.
+        
+    Returns:
+        tuple: A tuple containing a set of unique image names and a mapping from original image names to ImageId.
+    """
     image_names = set()
     # Map to store the original image name to the ImageId
     image_name_to_id_map = {}
     
+    # Iterate through the images and extract the ImageId
     for colmap_image_name, image in images.items():
         name = image.name
         # Extract ImageId from the name (assuming format like "camX/XXXX_XXNNNNXX_X.jpg")
@@ -64,14 +106,31 @@ def extract_image_names_from_colmap(images):
     return image_names, image_name_to_id_map
 
 def is_point_in_chunk(x, y, z, center_x, center_y, center_z, extent_x, extent_y, extent_z):
-    """Check if a point is within the chunk boundaries."""
+    """Check if a point is within the chunk boundaries.
+    
+    Args:
+        x, y, z: Coordinates of the point.
+        center_x, center_y, center_z: Center coordinates of the chunk.
+        extent_x, extent_y, extent_z: Extent of the chunk in each dimension.
+    
+    Returns:
+        bool: True if the point is within the chunk, False otherwise.
+    """
     # Check if the point is within the extent in all dimensions
     return (abs(x - center_x) <= extent_x/2 and 
             abs(y - center_y) <= extent_y/2 and 
             abs(z - center_z) <= extent_z/2)
 
 def read_center_and_extent(center_path, extent_path):
-    """Read center and extent values from files."""
+    """Read center and extent values from files.
+    
+    Args:
+        center_path (str): Path to the center file.
+        extent_path (str): Path to the extent file.
+        
+    Returns:
+        tuple: A tuple containing the center and extent values as lists of floats.
+    """
     with open(center_path, 'r') as f:
         center = [float(val) for val in f.read().strip().split()]
     
@@ -81,14 +140,30 @@ def read_center_and_extent(center_path, extent_path):
     return center, extent
 
 def read_translation_values(translation_path):
-    """Read translation values from JSON file."""
+    """Read translation values from JSON file.
+    
+    Args:
+        translation_path (str): Path to the translation JSON file.
+    
+    Returns:
+        tuple: A tuple containing the x and y translation values as floats.
+    """
     with open(translation_path, 'r') as f:
         translation = json.load(f)
     
     return translation["x_translation"], translation["y_translation"]
 
 def compute_extrinsics(face, vehicle_direction, yaw):
-    """Compute extrinsics for a given face, vehicle direction, and yaw."""
+    """Compute extrinsics for a given face, vehicle direction, and yaw.
+    
+    Args:
+        face (str): The face direction ('f', 'r', 'b', 'l', etc.).
+        vehicle_direction (float): The vehicle direction in degrees.
+        yaw (float): The yaw in degrees.
+        
+    Returns:
+        np.ndarray: The rotation matrix for the given face, vehicle direction, and yaw.
+    """
     # The yaw in degrees is the sum of the yaw, the vehicle direction and the face direction
     yaw_degrees = yaw + vehicle_direction + {
         'f': 0,
@@ -144,29 +219,16 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     R = np.dot(R_x, R_z)
     return R
 
-def rotmat2qvec(R):
-    """Convert rotation matrix to quaternion vector."""
-    Rxx, Ryx, Rzx, Rxy, Ryy, Rzy, Rxz, Ryz, Rzz = R.flat
-    K = (
-        np.array(
-            [
-                [Rxx - Ryy - Rzz, 0, 0, 0],
-                [Ryx + Rxy, Ryy - Rxx - Rzz, 0, 0],
-                [Rzx + Rxz, Rzy + Ryz, Rzz - Rxx - Ryy, 0],
-                [Ryz - Rzy, Rzx - Rxz, Rxy - Ryx, Rxx + Ryy + Rzz],
-            ]
-        )
-        / 3.0
-    )
-    eigvals, eigvecs = np.linalg.eigh(K)
-    qvec = eigvecs[[3, 0, 1, 2], np.argmax(eigvals)]
-    if qvec[0] < 0:
-        qvec *= -1
-    return qvec
-
 def calculate_translation(rotation_matrix, position):
     """
     Calculate the translation vector given a rotation matrix and position.
+
+    Args:
+        rotation_matrix (np.ndarray): The rotation matrix.
+        position (list or np.ndarray): The position vector.
+    
+    Returns:
+        np.ndarray: The translation vector.
     """
     position = np.array(position, dtype=float).reshape(3, 1)
     
@@ -177,10 +239,23 @@ def calculate_translation(rotation_matrix, position):
 
 def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_name_to_id_map, len_all_augmented_images, center, extent, translation, faces):
     """
-    Process the recordings and insert new ones based on the criteria.
+    Process the recordings and insert new ones based on multiple criterias.
     Filter recordings to include only those present in COLMAP for this chunk
     but check against all COLMAP image IDs for uniqueness.
     Keep only augmented images within chunk boundaries.
+
+    Args:
+        json_data (dict): JSON data containing recording properties.
+        chunk_image_names (set): Set of image names in the current chunk.
+        all_image_names (set): Set of all image names.
+        image_name_to_id_map (dict): Mapping from image names to IDs.
+        len_all_augmented_images (int): Length of the augmented images dictionary.
+        center (list): Center coordinates of the chunk.
+        extent (list): Extent of the chunk in each dimension.
+        translation (tuple): Translation values for x and y axes.
+        faces (list): List of camera faces to consider.
+    Returns:
+        tuple: A tuple containing new recordings, augmented COLMAP images, updated all_image_names, and image_name_to_id_map.
     """
     recordings = json_data["RecordingProperties"]
     # Filter recordings to include only those present in COLMAP for this chunk
@@ -313,10 +388,29 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
     return new_recordings, augmented_colmap_images, all_image_names, image_name_to_id_map
 
 def write_colmap_images(output_path, images_dict):
-    """Write COLMAP images_depths.bin file."""
+    """Write COLMAP images_depths.bin file.
+    
+    Args:
+        output_path (str): Path to the output .bin file.
+        images_dict (dict): Dictionary of COLMAP images.
+    """
     try:
-        # Write the images to a .bin file
-        write_images_binary(images_dict, output_path)
+        remapped_images = {}
+        for new_id, (_, image) in enumerate(sorted(images_dict.items())):
+            # Create a copy of the image with updated ID
+            updated_image = Image(
+                id=new_id,
+                qvec=image.qvec,
+                tvec=image.tvec,
+                camera_id=image.camera_id,
+                name=image.name,
+                xys=image.xys,
+                point3D_ids=image.point3D_ids
+            )
+            remapped_images[new_id] = updated_image
+        
+        # Write the remapped images to a .bin file
+        write_images_binary(remapped_images, output_path)
         print(f"Successfully wrote {len(images_dict)} augmented images to {output_path}")
         
     except Exception as e:
@@ -324,7 +418,27 @@ def write_colmap_images(output_path, images_dict):
         sys.exit(1)
 
 def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, image_name_to_id_map, all_augmented_images, all_new_recordings):
-    """Process a single chunk."""
+    """Process a single chunk. For each chunk, read the COLMAP model,
+    extract image names, and interpolate recordings.
+    Filter recordings to include only those present in COLMAP for this chunk
+    but check against all COLMAP image IDs for uniqueness.
+    Keep only augmented images within chunk boundaries.
+    Write COLMAP images_depths.bin for this chunk.
+    Handle exceptions for robustness.
+    
+    Args:
+        chunk_folder (str): Path to the chunk folder.
+        translation (tuple): Translation values for x and y axes.
+        faces (list): List of camera faces to consider.
+        json_data (dict): JSON data containing recording properties.
+        all_image_names (set): Set of all image names.
+        image_name_to_id_map (dict): Mapping from image names to IDs.
+        all_augmented_images (dict): Dictionary of augmented COLMAP images.
+        all_new_recordings (list): List of new recordings.
+    
+    Returns:
+        tuple: A tuple containing new recordings, augmented COLMAP images, updated all_image_names, and image_name_to_id_map.
+    """
     try:
         # Paths for this chunk
         colmap_bin_path = os.path.join(chunk_folder, 'sparse', '0')
@@ -366,7 +480,14 @@ def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, 
         return image_name_to_id_map
 
 def collect_all_image_names(project_dir):
-    """Collect all image names from the entire model."""
+    """Collect all image names from the entire model.
+    
+    Args:
+        project_dir (str): Path to the project directory.
+    
+    Returns:
+        tuple: A tuple containing a set of all image names and a mapping from original image names to ImageId.
+    """
     aligned_path = os.path.join(project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
     
     all_image_names = set()
@@ -384,7 +505,7 @@ def collect_all_image_names(project_dir):
 def main():
     parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
     parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
-    parser.add_argument('--directions', type=str, default='1', choices=['1', '2', '3'], 
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3'], 
                         help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
     
     args = parser.parse_args()

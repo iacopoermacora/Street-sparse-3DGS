@@ -42,8 +42,6 @@ class Scene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            print("arg.source_path, Arg.images, args.alpha_masks, args.depths, args.eval, args.train_test_exp, args.additional_depth_maps")
-            print(args.source_path, args.images, args.alpha_masks, args.depths, args.eval, args.train_test_exp, args.additional_depth_maps)
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.alpha_masks, args.depths, args.eval, args.train_test_exp, args.additional_depth_maps) # PACOMMENT: I added the additional_depth_maps parameter
         else:
             assert False, "Could not recognize scene type!"

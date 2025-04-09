@@ -24,7 +24,8 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_hierarchy._C import load_hierarchy, write_hierarchy
 from scene.OurAdam import Adam
 
-# import faiss
+import faiss
+import time
 
 class GaussianModel:
 
@@ -699,80 +700,98 @@ class GaussianModel:
         self.xyz_gradient_accum[update_filter] = torch.max(torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True), self.xyz_gradient_accum[update_filter])
         self.denom[update_filter] += 1
 
-    def load_gt_point_cloud(self, gt_point_cloud_path): # PACOMMENT: Added this function to load the ground truth point cloud
+    def load_gt_point_cloud(self, gt_point_cloud_path):
         """
         Loads the ground truth point cloud from a .ply file
-        Assumes points are in meters.
+        and creates a FAISS index directly on the GPU for fast nearest neighbor search.
+        Falls back to CPU if GPU is not available.
         """
-
+        print(f"Loading ground truth point cloud from {gt_point_cloud_path}")
         plydata = PlyData.read(gt_point_cloud_path)
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         
         xyz = xyz.astype(np.float32)
-
-        # Create index - using Euclidean distance (L2)
-        self.gt_point_cloud = faiss.IndexFlatL2(3)  # 3D points
-
-        # Add points to the index
-        self.gt_point_cloud.add(xyz)
-
-        print(f"Loaded {xyz.shape[0]} points into FAISS index")
         
-        # If GPU is available, we can make the index use GPU for even faster queries
-        if torch.cuda.is_available():
-            # This creates a GPU version of the index
-            try:
-                res = faiss.StandardGpuResources()
-                self.gt_point_cloud = faiss.index_cpu_to_gpu(res, 0, self.gt_point_cloud)
-                print("FAISS index moved to GPU")
-            except Exception as e:
-                print(f"Could not move FAISS index to GPU: {e}. Using CPU index instead.")
-
+        print(f"Loaded {xyz.shape[0]} points from ground truth")
+        
+        dimension = 3  # 3D points
+        
+        try:
+            # Check if FAISS was built with GPU support
+            assert hasattr(faiss, 'StandardGpuResources')
+            
+            # Create GPU resources
+            res = faiss.StandardGpuResources()
+            
+            # Configure GPU index
+            config = faiss.GpuIndexFlatConfig()
+            config.useFloat16 = False  # Use full precision for better accuracy
+            config.device = 0  # Use first GPU
+            
+            # Create the index directly on GPU
+            self.gt_point_cloud = faiss.GpuIndexFlatL2(res, dimension, config)
+            
+            # Add vectors to the index
+            self.gt_point_cloud.add(xyz)
+            print("FAISS index created directly on GPU successfully")
+        except Exception as e:
+            # Fallback to CPU if GPU fails
+            print(f"Could not use GPU for FAISS: {e}. Creating CPU index instead.")
+            
+            # Create CPU index
+            cpu_index = faiss.IndexFlatL2(dimension)
+            cpu_index.add(xyz)
+            self.gt_point_cloud = cpu_index
+        
+        print(f"FAISS index created with {xyz.shape[0]} points")
 
     def compare_points_to_gt(self, new_xyz):
         """
-        Only keep points that are within 1 cm of the ground truth point cloud.
-
-        Args:
-            new_xyz: The new points that have been filtered.
-            selected_pts_mask: A boolean mask indicating which points were selected for densification.
-
-        Returns:
-            A boolean mask indicating which points are selected for densification after further distance filtering.
-        """
-        # gt_point_cloud = self.gt_point_cloud
-
-        # # Compute the minimum distance between each point and the ground truth point cloud
-        # dists = torch.cdist(new_xyz, gt_point_cloud)
-        # min_dists = torch.min(dists, dim=1).values
-
-        # # Keep only the points that are within 1 cm of the ground truth point cloud
-        # filtered_points_mask = min_dists < 0.01
-        # new_xyz_filtered = new_xyz[filtered_points_mask]
+        Only keep points that are within a distance threshold of the ground truth point cloud.
         
-        # return new_xyz_filtered, filtered_points_mask
-
+        Args:
+            new_xyz: The new points to filter (tensor on GPU)
+            
+        Returns:
+            - filtered_xyz: Tensor of points that are close to ground truth
+            - mask: Boolean mask indicating which points to keep
+            - num_discarded: Number of points that were filtered out
+        """
         print("Filtering points based on distance to ground truth point cloud")
 
-        distance_threshold = 0.01  # 1 cm
-
+        start_time = time.time()
+        
+        distance_threshold = 0.01  # 1 cm threshold
+        
+        # Convert tensor to numpy for FAISS
         new_xyz_np = new_xyz.detach().cpu().numpy().astype(np.float32)
-
+        
         print(f"Searching for nearest neighbors in the ground truth point cloud...")
-
+        
         # Search for nearest neighbors
         distances, _ = self.gt_point_cloud.search(new_xyz_np, k=1)
-
+        
         print(f"Found nearest neighbors in the ground truth point cloud")
+        
+        # Create mask for points that have neighbors within the threshold
+        # FAISS returns squared L2 distances
+        mask = distances[:, 0] <= distance_threshold**2
+        
+        # Convert mask to torch tensor
+        mask_tensor = torch.from_numpy(mask).to(new_xyz.device)
+        
+        # Filter points using the mask
+        filtered_xyz = new_xyz[mask_tensor]
+        
+        # Count how many points were discarded
+        num_discarded = len(new_xyz) - mask.sum()
+        
+        print(f"Filtered {num_discarded} points out of {len(new_xyz)}")
 
-        # Identify points that have neighbors within the threshold
-        # distances shape is (n_points, k) = (n_points, 1) in this case
-        points_to_keep = distances[:, 0] <= distance_threshold**2  # FAISS returns squared L2 distances
+        print("$"*100)
+        print(f"The LiDAR constraint took {time.time() - start_time:.2f} seconds")
+        print("$"*100)
 
-        # Count how many points have been discarded
-        num_discarded = len(new_xyz) - points_to_keep.sum()
-
-        # Return the filtered points
-        return new_xyz[points_to_keep], points_to_keep, num_discarded
+        return filtered_xyz, mask_tensor, num_discarded
