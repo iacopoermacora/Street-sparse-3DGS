@@ -73,7 +73,7 @@ def convert_colmap_bin_to_json(model_dir, output_file):
     output = {"imgs": []}
 
     # List of accepted faces
-    accepted_faces = ["f", "l", "r", "b", "f1", "l1", "r1", "b1", "u1", "u2"]
+    accepted_faces = ["f1", "l1", "r1", "b1", "u1", "u2"]
     
     # Process images
     for image_id, image in images.items():

@@ -157,7 +157,7 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     """Compute extrinsics for a given face, vehicle direction, and yaw.
     
     Args:
-        face (str): The face direction ('f', 'r', 'b', 'l', etc.).
+        face (str): The face direction ('f1', 'r1', 'b1', 'l1', etc.).
         vehicle_direction (float): The vehicle direction in degrees.
         yaw (float): The yaw in degrees.
         
@@ -166,10 +166,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     """
     # The yaw in degrees is the sum of the yaw, the vehicle direction and the face direction
     yaw_degrees = yaw + vehicle_direction + {
-        'f': 0,
-        'r': 90,
-        'b': 180,
-        'l': 270,
         'f1': 0,
         'f2': 45,
         'r1': 90,
@@ -184,10 +180,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     
     # Convert pitch and yaw from degrees to radians
     pitch_radians = np.radians(90 +{
-        'f': 0,
-        'r': 0,
-        'b': 0,
-        'l': 0,
         'f1': 0,
         'f2': 0,
         'r1': 0,
@@ -350,7 +342,7 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                     # Get camera number for the current face (for naming only)
                     if args.directions == '1':
                         cam_n = {
-                            'f': 1, 'r': 2, 'b': 3, 'l': 4
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
                         }[face]
                     elif args.directions == '2' or args.directions == '3':
                         cam_n = {
@@ -358,7 +350,7 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                         }[face]
                     elif args.directions == '4':
                         cam_n = {
-                            'f': 1, 'r': 2, 'b': 3, 'l': 4, 'u1': 5, 'u2': 6
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
                         }[face]
                 
                     # Create a unique index for this augmented image if it does not already have an assigned number
@@ -513,13 +505,13 @@ def collect_all_image_names(project_dir):
 def main():    
     # Define the faces based on chosen directions
     if args.directions == '1':
-        faces = ['f', 'r', 'b', 'l']
+        faces = ['f1', 'r1', 'b1', 'l1']
     elif args.directions == '2':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
     elif args.directions == '3':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
     elif args.directions == '4':
-        faces = ['f', 'r', 'b', 'l', 'u1', 'u2']
+        faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
     
     # Define paths based on project directory
     chunks_folder = os.path.join(args.project_dir, 'camera_calibration', 'chunks')

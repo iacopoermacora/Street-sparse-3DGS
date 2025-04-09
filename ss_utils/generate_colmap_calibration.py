@@ -211,10 +211,10 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
                 # Get camera number for the current face
                 if args.directions == "1":
                     cam_n = {
-                        'f': 1,
-                        'r': 2,
-                        'b': 3,
-                        'l': 4
+                        'f1': 1,
+                        'r1': 2,
+                        'b1': 3,
+                        'l1': 4
                     }[face]
                 elif args.directions == "2" or args.directions == "3":
                     cam_n = {
@@ -231,10 +231,10 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
                     }[face]
                 elif args.directions == "4":
                     cam_n = {
-                        'f': 1,
-                        'r': 2,
-                        'b': 3,
-                        'l': 4,
+                        'f1': 1,
+                        'r1': 2,
+                        'b1': 3,
+                        'l1': 4,
                         'u1': 5,
                         'u2': 6
                     }[face]
@@ -279,10 +279,6 @@ def compute_intrinsics(cube_face_size):
 def compute_extrinsics(face, vehicle_direction, yaw):
     # The yaw in degrees is the sum of the yaw, the vehicle direction and the face direction
     yaw_degrees = yaw + vehicle_direction + {
-        'f': 0,
-        'r': 90,
-        'b': 180,
-        'l': 270,
         'f1': 0,
         'f2': 45,
         'r1': 90,
@@ -297,10 +293,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     
     # Convert pitch and yaw from degrees to radians
     pitch_radians = np.radians(90 +{
-        'f': 0,
-        'r': 0,
-        'b': 0,
-        'l': 0,
         'f1': 0,
         'f2': 0,
         'r1': 0,
@@ -484,10 +476,10 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
             # Get camera number for the current face.
             if args.directions == "1":
                 cam_n = {
-                    'f': 1,
-                    'r': 2,
-                    'b': 3,
-                    'l': 4
+                    'f1': 1,
+                    'r1': 2,
+                    'b1': 3,
+                    'l1': 4
                 }[face]
             elif args.directions == "2" or args.directions == "3":
                 cam_n = {
@@ -504,10 +496,10 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
                 }[face]
             elif args.directions == "4":
                 cam_n = {
-                    'f': 1,
-                    'r': 2,
-                    'b': 3,
-                    'l': 4,
+                    'f1': 1,
+                    'r1': 2,
+                    'b1': 3,
+                    'l1': 4,
                     'u1': 5,
                     'u2': 6
                 }[face]
@@ -552,11 +544,11 @@ if __name__ == "__main__":
     cube_face_size = args.cube_face_size
 
     if args.directions == "1":
-        faces = ['f', 'r', 'b', 'l']
+        faces = ['f1', 'r1', 'b1', 'l1']
     elif args.directions == "2":
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
     elif args.directions == "3":
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
     elif args.directions == "4":
-        faces = ['f', 'r', 'b', 'l', 'u1', 'u2']
+        faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
     main(recording_details_path, output_dir_bin, cube_face_size, faces, args.eval)

@@ -186,13 +186,13 @@ if __name__ == "__main__":
     sorted_images = sort_images_by_time(image_info)
 
     if args.directions == "1":
-        face_directions = ["f", "r", "b", "l"]
+        face_directions = ["f1", "r1", "b1", "l1"]
     elif args.directions == "2":
         face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2"]
     elif args.directions == "3":
         face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2", "u1", "u2"]
     elif args.directions == "4":
-        face_directions = ["f", "r", "b", "l", "u1", "u2"]
+        face_directions = ["f1", "r1", "b1", "l1", "u1", "u2"]
 
     copy_and_rename_images(sorted_images, raw_image_input, face_directions)
 

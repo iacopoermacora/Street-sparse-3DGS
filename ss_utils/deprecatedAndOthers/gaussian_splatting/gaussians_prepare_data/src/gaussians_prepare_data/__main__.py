@@ -117,10 +117,10 @@ def PrepareData(
     image_ids = [str(recording_properties['ImageId']) for recording_properties in recording_details['RecordingProperties'] ]
     # Updated LUT to cover more angles with 50% overlap
     if args.directions == '1':
-        face_names = ['f', 'r', 'b', 'l']
+        face_names = ['f1', 'r1', 'b1', 'l1']
         YAW_PITCH_LUT = { # PACOMMENT: modified
-        'f': (0, 0), 'r': (270, 0),
-        'b': (180, 0), 'l': (90, 0)
+        'f1': (0, 0), 'r1': (270, 0),
+        'b1': (180, 0), 'l1': (90, 0)
         }
     elif args.directions == '2':
         face_names = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
@@ -140,10 +140,10 @@ def PrepareData(
             'u1': (270, 45), 'u2': (90, 45)
         }
     elif args.directions == '4':
-        face_names = ['f', 'r', 'l', 'b', 'u1', 'u2']
+        face_names = ['f1', 'r1', 'l1', 'b1', 'u1', 'u2']
         YAW_PITCH_LUT = { # PACOMMENT: modified
-            'f': (0, 0), 'r': (270, 0),
-            'l': (90, 0), 'b': (180, 0),
+            'f1': (0, 0), 'r1': (270, 0),
+            'l1': (90, 0), 'b1': (180, 0),
             'u1': (270, 45), 'u2': (90, 45)
         }
 
@@ -177,7 +177,7 @@ def PrepareData(
 
         # process the
         for face_name in face_names:
-            # YAW_LUT = {'f': 0, 'r': 270, 'b': 180, 'l': 90} # PACOMMENT: Commented
+            # YAW_LUT = {'f1': 0, 'r1': 270, 'b1': 180, 'l1': 90} # PACOMMENT: Commented
             # yaw_degrees = YAW_LUT[face_name] # PACOMMENT: Commented
             yaw_degrees, pitch_degrees = YAW_PITCH_LUT[face_name] # PACOMMENT: Added
             total_rotations = image_correction["ImageCorrectionForVehicleDirection"] + math.radians(yaw_degrees) - image_correction["ImageCorrectionForNorth"]
