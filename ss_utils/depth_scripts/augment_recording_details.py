@@ -348,11 +348,19 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                     translation_vector = calculate_translation(rotation_matrix, position)
                     
                     # Get camera number for the current face (for naming only)
-                    cam_n = {
-                        'f': 1, 'r': 2, 'b': 3, 'l': 4,
-                        'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
-                    }[face]
-                    
+                    if args.directions == '1':
+                        cam_n = {
+                            'f': 1, 'r': 2, 'b': 3, 'l': 4
+                        }[face]
+                    elif args.directions == '2' or args.directions == '3':
+                        cam_n = {
+                            'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
+                        }[face]
+                    elif args.directions == '4':
+                        cam_n = {
+                            'f': 1, 'r': 2, 'b': 3, 'l': 4, 'u1': 5, 'u2': 6
+                        }[face]
+                
                     # Create a unique index for this augmented image if it does not already have an assigned number
                     if new_image_name not in image_name_to_id_map:
                         image_name_to_id_map[new_image_name] = colmap_station_number
@@ -502,21 +510,16 @@ def collect_all_image_names(project_dir):
     
     return all_image_names, image_name_to_id_map
 
-def main():
-    parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
-    parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
-    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
-    
-    args = parser.parse_args()
-    
+def main():    
     # Define the faces based on chosen directions
     if args.directions == '1':
         faces = ['f', 'r', 'b', 'l']
     elif args.directions == '2':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
-    else:  # '3'
+    elif args.directions == '3':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
+    elif args.directions == '4':
+        faces = ['f', 'r', 'b', 'l', 'u1', 'u2']
     
     # Define paths based on project directory
     chunks_folder = os.path.join(args.project_dir, 'camera_calibration', 'chunks')
@@ -574,4 +577,10 @@ def main():
         print(traceback.format_exc())
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
+    parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    
+    args = parser.parse_args()
     main()

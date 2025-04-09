@@ -59,7 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--masks_dir', default="", help="Will be set to project_dir/inputs/masks if exists and not set")
     
     # NOTE: Adding argument to control the different workflows
-    parser.add_argument('--calibration', type=str, default="sfm", help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
+    parser.add_argument('--calibration', type=str, default="cal_sfm", choices=['sfm', 'cal_sfm'], help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
 
     args = parser.parse_args()
 
