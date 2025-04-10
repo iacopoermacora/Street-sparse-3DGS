@@ -157,7 +157,7 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     """Compute extrinsics for a given face, vehicle direction, and yaw.
     
     Args:
-        face (str): The face direction ('f', 'r', 'b', 'l', etc.).
+        face (str): The face direction ('f1', 'r1', 'b1', 'l1', etc.).
         vehicle_direction (float): The vehicle direction in degrees.
         yaw (float): The yaw in degrees.
         
@@ -166,10 +166,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     """
     # The yaw in degrees is the sum of the yaw, the vehicle direction and the face direction
     yaw_degrees = yaw + vehicle_direction + {
-        'f': 0,
-        'r': 90,
-        'b': 180,
-        'l': 270,
         'f1': 0,
         'f2': 45,
         'r1': 90,
@@ -184,10 +180,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     
     # Convert pitch and yaw from degrees to radians
     pitch_radians = np.radians(90 +{
-        'f': 0,
-        'r': 0,
-        'b': 0,
-        'l': 0,
         'f1': 0,
         'f2': 0,
         'r1': 0,
@@ -348,11 +340,19 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                     translation_vector = calculate_translation(rotation_matrix, position)
                     
                     # Get camera number for the current face (for naming only)
-                    cam_n = {
-                        'f': 1, 'r': 2, 'b': 3, 'l': 4,
-                        'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
-                    }[face]
-                    
+                    if args.directions == '1':
+                        cam_n = {
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
+                        }[face]
+                    elif args.directions == '2' or args.directions == '3':
+                        cam_n = {
+                            'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
+                        }[face]
+                    elif args.directions == '4':
+                        cam_n = {
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
+                        }[face]
+                
                     # Create a unique index for this augmented image if it does not already have an assigned number
                     if new_image_name not in image_name_to_id_map:
                         image_name_to_id_map[new_image_name] = colmap_station_number
@@ -502,21 +502,16 @@ def collect_all_image_names(project_dir):
     
     return all_image_names, image_name_to_id_map
 
-def main():
-    parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
-    parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
-    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
-    
-    args = parser.parse_args()
-    
+def main():    
     # Define the faces based on chosen directions
     if args.directions == '1':
-        faces = ['f', 'r', 'b', 'l']
+        faces = ['f1', 'r1', 'b1', 'l1']
     elif args.directions == '2':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
-    else:  # '3'
+    elif args.directions == '3':
         faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
+    elif args.directions == '4':
+        faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
     
     # Define paths based on project directory
     chunks_folder = os.path.join(args.project_dir, 'camera_calibration', 'chunks')
@@ -574,4 +569,10 @@ def main():
         print(traceback.format_exc())
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
+    parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    
+    args = parser.parse_args()
     main()

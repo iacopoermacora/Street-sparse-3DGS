@@ -51,7 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_jobs', type=int, default=8, help="Run per chunk COLMAP in parallel on the same machine. Does not handle multi GPU systems. --use_slurm overrides this.")
 
     # NOTE: Adding argument to deal with already generated colmap
-    parser.add_argument('--calibration', type=str, default="sfm",  help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
+    parser.add_argument('--calibration', type=str, default="cal_sfm",  choices=['sfm', 'cal_sfm'], help="Preprocessing workflow to execute. Options: sfm, cal_sfm")
     parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
     parser.add_argument('--LiDAR_downsample_density', type=int, default=500, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
     args = parser.parse_args()

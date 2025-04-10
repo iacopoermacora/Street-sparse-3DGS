@@ -20,7 +20,7 @@ import time
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True)
-    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
     args = parser.parse_args()
 
     # Prompt the user to prevent execution of the script if not in a x server environment

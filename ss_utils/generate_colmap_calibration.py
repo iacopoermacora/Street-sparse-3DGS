@@ -68,7 +68,7 @@ def sort_images_by_time(image_info):
     sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
     return sorted_images
 
-def select_eval_images(sorted_images, metadata, faces):
+def select_eval_images(sorted_images, metadata):
     """
     Select images for evaluation based on time and distance constraints:
     - Select one image every 5 in order of time
@@ -209,22 +209,35 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
             
             for face in faces:
                 # Get camera number for the current face
-                cam_n = {
-                    'f': 1,
-                    'r': 2,
-                    'b': 3,
-                    'l': 4,
-                    'f1': 1,
-                    'f2': 2,
-                    'r1': 3,
-                    'r2': 4,
-                    'b1': 5,
-                    'b2': 6,
-                    'l1': 7,
-                    'l2': 8,
-                    'u1': 9,
-                    'u2': 10
-                }[face]
+                if args.directions == "1":
+                    cam_n = {
+                        'f1': 1,
+                        'r1': 2,
+                        'b1': 3,
+                        'l1': 4
+                    }[face]
+                elif args.directions == "2" or args.directions == "3":
+                    cam_n = {
+                        'f1': 1,
+                        'f2': 2,
+                        'r1': 3,
+                        'r2': 4,
+                        'b1': 5,
+                        'b2': 6,
+                        'l1': 7,
+                        'l2': 8,
+                        'u1': 9,
+                        'u2': 10
+                    }[face]
+                elif args.directions == "4":
+                    cam_n = {
+                        'f1': 1,
+                        'r1': 2,
+                        'b1': 3,
+                        'l1': 4,
+                        'u1': 5,
+                        'u2': 6
+                    }[face]
                 image_name = f"cam{cam_n}/{idx_str}_{img_id}_{face}.jpg"
                 f.write(f"{image_name}\n")
     
@@ -266,10 +279,6 @@ def compute_intrinsics(cube_face_size):
 def compute_extrinsics(face, vehicle_direction, yaw):
     # The yaw in degrees is the sum of the yaw, the vehicle direction and the face direction
     yaw_degrees = yaw + vehicle_direction + {
-        'f': 0,
-        'r': 90,
-        'b': 180,
-        'l': 270,
         'f1': 0,
         'f2': 45,
         'r1': 90,
@@ -284,10 +293,6 @@ def compute_extrinsics(face, vehicle_direction, yaw):
     
     # Convert pitch and yaw from degrees to radians
     pitch_radians = np.radians(90 +{
-        'f': 0,
-        'r': 0,
-        'b': 0,
-        'l': 0,
         'f1': 0,
         'f2': 0,
         'r1': 0,
@@ -381,7 +386,7 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
         print("Running in evaluation mode")
 
         # Select test images based on time and distance costraints
-        train_images, colmap_image_ids, test_images = select_eval_images(sorted_images, metadata, faces)
+        train_images, colmap_image_ids, test_images = select_eval_images(sorted_images, metadata)
         
         # Create recording_details_train.json with the images selected for training
         create_filtered_json(train_images, metadata, os.path.dirname(recording_details_path), 'recording_details_train.json')
@@ -469,22 +474,35 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
             translation_vector = calculate_translation(rotation_matrix, position)
 
             # Get camera number for the current face.
-            cam_n = {
-                'f': 1,
-                'r': 2,
-                'b': 3,
-                'l': 4,
-                'f1': 1,
-                'f2': 2,
-                'r1': 3,
-                'r2': 4,
-                'b1': 5,
-                'b2': 6,
-                'l1': 7,
-                'l2': 8,
-                'u1': 9,
-                'u2': 10
-            }[face]
+            if args.directions == "1":
+                cam_n = {
+                    'f1': 1,
+                    'r1': 2,
+                    'b1': 3,
+                    'l1': 4
+                }[face]
+            elif args.directions == "2" or args.directions == "3":
+                cam_n = {
+                    'f1': 1,
+                    'f2': 2,
+                    'r1': 3,
+                    'r2': 4,
+                    'b1': 5,
+                    'b2': 6,
+                    'l1': 7,
+                    'l2': 8,
+                    'u1': 9,
+                    'u2': 10
+                }[face]
+            elif args.directions == "4":
+                cam_n = {
+                    'f1': 1,
+                    'r1': 2,
+                    'b1': 3,
+                    'l1': 4,
+                    'u1': 5,
+                    'u2': 6
+                }[face]
             image_name = f"cam{cam_n}/{idx_str}_{record['ImageId']}_{face}.jpg"
 
             qvec = rotmat2qvec(rotation_matrix)
@@ -514,6 +532,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
     parser.add_argument('--eval', action='store_true', help="Enable evaluation mode to select one image every 5 and check distance constraints")
+    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], help="Choose the directions for the cube faces: 1 (f,r,b,l), 2 (f1,f2,r1,r2,b1,b2,l1,l2), 3 (f1,f2,r1,r2,b1,b2,l1,l2,u1,u2)")
 
     # Additional arguments to tweak certain parameters
     parser.add_argument('--cube_face_size', type=int, default=1536, help="Size of the cube face in pixels")
@@ -524,21 +543,12 @@ if __name__ == "__main__":
     output_dir_bin = f"{args.project_dir}/camera_calibration/unrectified/sparse/0/"
     cube_face_size = args.cube_face_size
 
-    # Allow the user to choose the directions of the cube faces
-    choice = 0
-    while choice not in ["1", "2", "3"]:
-            print("Choose the directions you want to use:")
-            print("1. Forward, Right, Backward, Left")
-            print("2. Forward1, Forward2, Right1, Right2, Backward1, Backward2, Left1, Left2")
-            print("3. Forward1, Forward2, Right1, Right2, Backward1, Backward2, Left1, Left2, Up1, Up2")
-            choice = input("Enter your choice: ")
-            # Define the directions \
-            if choice == "1":
-                faces = ['f', 'r', 'b', 'l']
-            elif choice == "2":
-                faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
-            elif choice == "3":
-                faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
-            else:
-                print("Invalid choice. Please try again.")
+    if args.directions == "1":
+        faces = ['f1', 'r1', 'b1', 'l1']
+    elif args.directions == "2":
+        faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
+    elif args.directions == "3":
+        faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
+    elif args.directions == "4":
+        faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
     main(recording_details_path, output_dir_bin, cube_face_size, faces, args.eval)

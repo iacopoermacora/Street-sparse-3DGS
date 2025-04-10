@@ -176,7 +176,7 @@ def update_exif(image_path, x, y):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
-    parser.add_argument('--directions', type=str, default="3", help="Camera directions: 1=Front, Right, Back, Left; 2=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2; 3=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2, Up1, Up2")
+    parser.add_argument('--directions', type=str, default="3", choices=['1', '2', '3', '4'], help="Camera directions: 1=Front, Right, Back, Left; 2=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2; 3=Front1, Front2, Right1, Right2, Back1, Back2, Left1, Left2, Up1, Up2")
     args = parser.parse_args()
 
     raw_input = f"{args.project_dir}/ss_raw_images"
@@ -186,12 +186,13 @@ if __name__ == "__main__":
     sorted_images = sort_images_by_time(image_info)
 
     if args.directions == "1":
-        face_directions = ["f", "r", "b", "l"]
+        face_directions = ["f1", "r1", "b1", "l1"]
     elif args.directions == "2":
         face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2"]
     elif args.directions == "3":
         face_directions = ["f1", "f2", "r1", "r2", "b1", "b2", "l1", "l2", "u1", "u2"]
-
+    elif args.directions == "4":
+        face_directions = ["f1", "r1", "b1", "l1", "u1", "u2"]
 
     copy_and_rename_images(sorted_images, raw_image_input, face_directions)
 
