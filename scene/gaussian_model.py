@@ -24,7 +24,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_hierarchy._C import load_hierarchy, write_hierarchy
 from scene.OurAdam import Adam
 
-import faiss
+#import faiss
 import time
 
 class GaussianModel:
