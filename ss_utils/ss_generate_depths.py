@@ -215,8 +215,6 @@ if __name__ == "__main__":
 
     # Call the script to render the depth maps
 
-    sys.exit(0)
-
     print("#"*30)
     print("Step 6/7: Rendering the depth maps")
     print("#"*30)

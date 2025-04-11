@@ -13,6 +13,7 @@ ss_raw_images
 ss_utils/depth_scripts/ctm_exporter/ctm_exporter.cpython*
 ss_utils/depth_scripts/ctm_exporter/build
 ss_utils/depth_scripts/ctm_exporter/ctm_exporter.egg-info
+ss_utils/depth_scripts/ctm_exporter/dist/ctm_exporter-0.1-py3.12-linux-x86_64.egg
 ss_utils/depth_scripts/ctm_exporter/dist
 vis2mesh/example
 vis2mesh/checkpoints/*.pth
