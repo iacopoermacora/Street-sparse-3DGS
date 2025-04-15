@@ -240,12 +240,12 @@ if __name__ == "__main__":
             f"--in_terrestrial_stations_file_url=file:///depth_data/camera_calibration/depth_files/total.stations",
             f"--in_mesh_directory=file:///depth_data/camera_calibration/depth_files/ctm_meshes",
             f"--out_depth_cyclo_directory_url=file:///depth_data/camera_calibration/depth_files/rgb_depths",
-            "--10images"
+            f"--directions={args.directions}",
         ]
         try:
             subprocess.run(render_depth_gaussians, check=True)
         except subprocess.CalledProcessError as e:
-            print(f"Error executing json_rds_to_stations: {e}")
+            print(f"Error executing render_depth_gaussians: {e}")
             sys.exit(1)
         
         print(f"Time taken to render the depth maps: {time.time() - start_time} seconds")
