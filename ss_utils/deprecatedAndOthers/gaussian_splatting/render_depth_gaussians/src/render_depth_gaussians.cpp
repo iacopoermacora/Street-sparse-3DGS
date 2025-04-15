@@ -77,7 +77,7 @@ DEFINE_string
 DEFINE_string
 (
     directions,
-    "3",
+    "",
     "The identifier of the directions the cameras must be positioned. "
     "1=F1R1B1L1"
     "2=F1F2R1R2B1B2L1L2"
@@ -344,13 +344,13 @@ void RenderDepthForStations
         // Create the face names based on the directions argument
         std::vector<char> face_names;
         if (directions == "1") {
-            face_names = {'R', 'L', 'F', 'B'};
+            face_names = {'F', 'R', 'B', 'L'};
         } else if (directions == "2") {
-            face_names = {'R', 'R', 'L', 'L', 'F', 'F', 'B', 'B'};
+            face_names = {'F', 'F', 'R', 'R', 'B', 'B', 'L', 'L'};
         } else if (directions == "3") {
             face_names = {'F', 'F', 'R', 'R', 'B', 'B', 'L', 'L', 'U', 'U'};
         } else if (directions == "4") {
-            face_names = {'F', 'B', 'R', 'L', 'U', 'U'};
+            face_names = {'F', 'R', 'B', 'L', 'U', 'U'};
         } else {
             LOG(FATAL) << "Invalid directions argument: " << directions;
         }
@@ -382,8 +382,8 @@ void RenderDepthForStations
 
             VLOG(4) << "Rendered " << (i+1) << " of " << ordened.size();
 
-            cv::Mat depths_as_color[10];
-            std::string faces_names[10];
+            cv::Mat depths_as_color[cube_distance_size];
+            std::string faces_names[cube_distance_size];
 
             for (int cube_face = 0; cube_face < cube_distance_size; ++cube_face)
             {
@@ -393,7 +393,7 @@ void RenderDepthForStations
 
             // handle the zoom 1 lod
 
-            tbb::blocked_range<int> faces_range(0, 10);
+            tbb::blocked_range<int> faces_range(0, cube_distance_size);
             tbb::parallel_for
             (
                 faces_range,
@@ -431,7 +431,7 @@ void RenderDepthForStations
                         } else if (directions == "2" || directions == "3") {
                             face_number = cube_face % 2;
                         } else if (directions == "4") {
-                            face_number = (cube_face != 6) ? 1 : 2;
+                            face_number = (cube_face != 5) ? 1 : 2;
                         }
                         // TODO: Set face numbers accordingly
                         std::string tile_name = url_generator->GenerateTileUrl(rec_extr.id, face_number, face_names[cube_face], 0, 0);
@@ -503,6 +503,12 @@ int main(int argc, char** argv)
     if (FLAGS_out_depth_cyclo_directory_url == "")
     {
     	LOG(ERROR) << "Need, but missing: --out_depth_cyclo_directory_url";
+    	bail_early = true;
+    }
+
+    if (FLAGS_directions == "")
+    {
+    	LOG(ERROR) << "Need, but missing: --directions";
     	bail_early = true;
     }
 
