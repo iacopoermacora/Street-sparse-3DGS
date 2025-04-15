@@ -103,7 +103,7 @@ if __name__ == '__main__':
                 "python", "train_coarse.py",
                 "-s", colmap_dir,
                 "--save_iterations", "-1",
-                "-i", images_dir,
+                "-i", images_dir, f"-d {depths_dir}", # PACOMMENT: Added the depths dir
                 "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
                 "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
                 "--skybox_num", "100000",

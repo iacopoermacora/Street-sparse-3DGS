@@ -380,7 +380,7 @@ def find_chunks(project_dir):
     
     return chunks
 
-def create_depth_params_json_for_chunk(chunk_dir):
+def create_depth_params_json(chunk_dir):
     """
     Create a depth_params.json file for a specific chunk.
     
@@ -436,8 +436,13 @@ def create_depth_params_for_all_chunks(project_dir):
     total_entries = 0
     for chunk_dir in chunks:
         print(f"Processing chunk: {os.path.basename(chunk_dir)}")
-        entries = create_depth_params_json_for_chunk(chunk_dir)
+        entries = create_depth_params_json(chunk_dir)
         total_entries += entries
+    
+    # Create the depth_params.json file in the aligned directory
+    aligned_dir = os.path.join(project_dir, "camera_calibration", "aligned")
+    
+    create_depth_params_json(aligned_dir)
     
     print(f"Created depth_params.json files for {len(chunks)} chunks with a total of {total_entries} entries")
 

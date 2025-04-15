@@ -38,7 +38,7 @@ def copy_folders(source_dir):
     Args:
         source_dir (str): The source directory containing the folders to copy.
     """
-    folders_to_copy = ["ss_raw_images", "inputs"]
+    folders_to_copy = ["ss_raw_images", "inputs", "camera_calibration"]
 
     # Check if the folders already exist in the current directory
     for folder in folders_to_copy:
