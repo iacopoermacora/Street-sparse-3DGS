@@ -162,9 +162,12 @@ cv::Matx44f MakeViewMatx44f(const cv::Matx33f& camera_rotation, const cv::Point3
     return ToMatx44(R_t) * MakeTranslationMatx(-relative_camera_pos);
 }
 
-cv::Vec3f combineMixedAngles(float angleInDegrees, float angleInRadians) {
+cv::Vec3f combineMixedAngles(float angleInDegrees, float angleInRadians, float zAngleInDegrees) {
     // Convert degrees to radians
     float angleInRadians1 = angleInDegrees * M_PI / 180.0f;
+
+    // Convert zAngleInDegrees to radians
+    float zAngleInRadians = zAngleInDegrees * M_PI / 180.0f;
     
     // Now both angles are in radians, so we can combine them
     float resultAngle = angleInRadians1 + angleInRadians;
@@ -172,15 +175,18 @@ cv::Vec3f combineMixedAngles(float angleInDegrees, float angleInRadians) {
     // Convert to a unit vector
     float x = std::sin(resultAngle);
     float y = std::cos(resultAngle);
+    float z = std::sin(zAngleInRadians);
 
     // Keep just the last 6 decimal places and do not allow the value -0
     x = std::round(x * 1000000) / 1000000;
     y = std::round(y * 1000000) / 1000000;
+    z = std::round(z * 1000000) / 1000000;
     if (x == -0) x = 0;
     if (y == -0) y = 0;
+    if (z == -0) z = 0;
     
     // Return as Vec3f (z = 0 for 2D direction)
-    return cv::Vec3f(x, y, 0);
+    return cv::Vec3f(x, y, z);
 }
 
 void TerrestrialMeshesRenderer::Render
@@ -189,7 +195,7 @@ void TerrestrialMeshesRenderer::Render
     const std::vector<std::shared_ptr<TerrestrialMesh> >& meshes,
     cv::Mat cube_distance[],
     float driving_direction,
-    const std::string& directions_config = "3"  // Default to the 10-face configuration
+    const std::string& directions_config
 )
 {
     int width = kFaceSizei;
@@ -229,29 +235,35 @@ void TerrestrialMeshesRenderer::Render
     // Define the number of faces and their directions based on the configuration
     int num_faces = 10;  // Default
     std::vector<float> directions;
+    std::vector<float> z_directions;
     
     if (directions_config == "1") {  // F1R1B1L1 (4 faces)
         num_faces = 4;
         directions = {0.0f, 90.0f, 180.0f, 270.0f};  // Front, Right, Back, Left
+        z_directions = {0.0f, 0.0f, 0.0f, 0.0f};  // No z direction
     } 
     else if (directions_config == "2") {  // F1F2R1R2B1B2L1L2 (8 faces)
         num_faces = 8;
         directions = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f};  // Two each of Front, Right, Back, Left
+        z_directions = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};  // No z direction
     }
     else if (directions_config == "3") {  // F1F2R1R2B1B2L1L2U1U2 (10 faces)
         num_faces = 10;
-        directions = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f, 45.0f, 225.0f};  // Original configuration
+        directions = {0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f, 90.0f, 270.0f};  // Original configuration
+        // Up1 and up2 are pointing up but tilted 45 degrees to the right and left
+        z_directions = {0.0f, 0.0f, 0.0f, 0.0f, 45.0f, 45.0f};
     }
     else if (directions_config == "4") {  // F1R1B1L1U1U2 (6 faces)
         num_faces = 6;
-        directions = {0.0f, 90.0f, 180.0f, 270.0f, 45.0f, 225.0f};  // Front, Right, Back, Left, Up1, Up2
+        directions = {0.0f, 90.0f, 180.0f, 270.0f, 90.0f, 270.0f};  // Front, Right, Back, Left, Up1, Up2
+        z_directions = {0.0f, 0.0f, 0.0f, 0.0f, 45.0f, 45.0f};  // Up1 and Up2
     }
 
     driving_direction = driving_direction - tr.orientation.z;
     // Create combined directions vector for the faces
     std::vector<cv::Vec3f> combined_directions(num_faces);
     for (int i = 0; i < num_faces; ++i) {
-        combined_directions[i] = combineMixedAngles(directions[i], driving_direction);
+        combined_directions[i] = combineMixedAngles(directions[i], driving_direction, z_directions[i]);
     }
 
     for (int face_idx = 0; face_idx < num_faces; ++face_idx)
