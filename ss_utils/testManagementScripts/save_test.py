@@ -118,6 +118,6 @@ def main():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
-    parser.add_argument('--storage_path', type=str, default="/media/raid_1/iermacora/Street-sparse-3DGS_outputs/", help="Path to the storage directory")
+    parser.add_argument('--storage_path', type=str, default="/media/nfs/9_1_raid/iermacora/Street-sparse-3DGS_outputs", help="Path to the storage directory")
     args = parser.parse_args()
     main()
