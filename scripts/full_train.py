@@ -152,13 +152,13 @@ if __name__ == '__main__':
         "--opacity_lr 0.01", "--scaling_lr 0.001", "--save_iterations -1",
         "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
         "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
+        f"-d {depths_dir}", # PACOMMENT: Added this line
         f"-i {images_dir}",  f"--scaffold_file {output_dir}/scaffold/point_cloud/iteration_30000"
     ])
     if masks_dir != "":
         post_opt_chunk_args += " --alpha_masks " + masks_dir
     if args.extra_training_args != "": 
         post_opt_chunk_args += " " + args.extra_training_args
-
     
     chunk_names = os.listdir(chunks_dir)
     for chunk_name in chunk_names:

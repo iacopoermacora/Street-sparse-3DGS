@@ -338,8 +338,8 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, addit
             masks_reading_dir
         )
         train_cam_infos.extend(depth_only_cam_infos)
-    print(len(test_cam_infos), "test images")
-    print(len(train_cam_infos), "train images")
+    print(len(test_cam_infos), " test images")
+    print(len(train_cam_infos), " train images")
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 

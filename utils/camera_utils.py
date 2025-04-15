@@ -58,7 +58,7 @@ def loadCam(args, id, cam_info, resolution_scale, is_test_dataset):
         orig_w, orig_h = image.size
     else:
         # Open depth map to get size
-        depth_image = Image.open(cam_info.depth_path)
+        depth_image = Image.open(cam_info.depth_path) # TODO: There must be a quicker way to get the size
         orig_w, orig_h = depth_image.size
 
     if args.resolution in [1, 2, 4, 8]:
