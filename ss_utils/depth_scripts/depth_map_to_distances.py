@@ -57,7 +57,9 @@ def convert_depth_map_to_meters(depth_image):
 
 def convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_depth=0.1, max_depth=None):
     """
-    Convert depth in meters to the inverse depth format used by 3D Gaussian Splatting.
+    Convert depth in meters to the inverse depth format used by 3D Gaussian Splatting,
+    and calculate the scale and offset needed to reconstruct the original inverse depth
+    from the normalized 16-bit representation.
     Preserves completely black pixels (background).
 
     Args:
@@ -68,6 +70,8 @@ def convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_d
     
     Returns:
         depth_16bit: Converted depth map in 16-bit unsigned integer format.
+        scale: The scale factor (inv_depth_max - inv_depth_min) for depth_params.json.
+        offset: The offset factor (inv_depth_min) for depth_params.json.
     """
     # Create a mask for valid depth values (not background and above min_depth)
     valid_mask = (depth_in_meters > min_depth) & (~background_mask)
@@ -75,24 +79,40 @@ def convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_d
     if max_depth is not None:
         valid_mask &= depth_in_meters < max_depth
     
-    # Calculate inverse depth (1/depth)
-    inv_depth = np.zeros_like(depth_in_meters)
-    inv_depth[valid_mask] = 1.0 / depth_in_meters[valid_mask]
+    # Initialize scale and offset to safe values (indicating potentially invalid/uniform depth)
+    scale = 0.0
+    offset = 0.0
     
-    # Normalize to [0, 1] range (only for valid pixels)
+    # Calculate inverse depth (1/depth)
+    inv_depth = np.zeros_like(depth_in_meters, dtype=np.float64) # Use float64 for precision
+
     if np.sum(valid_mask) > 0:
+        inv_depth[valid_mask] = 1.0 / depth_in_meters[valid_mask]
+
         inv_depth_min = np.min(inv_depth[valid_mask])
         inv_depth_max = np.max(inv_depth[valid_mask])
         
-        # Avoid division by zero
+        # Calculate scale and offset *before* normalization
+        # Handle the case where max == min (uniform depth or single pixel)
         if inv_depth_max > inv_depth_min:
-            # Only normalize non-background pixels
+            scale = float(inv_depth_max - inv_depth_min) # Ensure float type
+            offset = float(inv_depth_min)              # Ensure float type
+
+            # Normalize to [0, 1] range (only for valid pixels)
             inv_depth_norm = np.zeros_like(inv_depth)
-            inv_depth_norm[valid_mask] = (inv_depth[valid_mask] - inv_depth_min) / (inv_depth_max - inv_depth_min)
+            # Use calculated scale (delta) to avoid potential floating point issues if max-min is tiny
+            inv_depth_norm[valid_mask] = (inv_depth[valid_mask] - offset) / scale
         else:
+            # If max == min, all valid pixels have the same inverse depth.
+            # Normalization results in 0. Set scale to 0 and offset to the single value.
             inv_depth_norm = np.zeros_like(inv_depth)
+            scale = 0.0
+            offset = float(inv_depth_min) # The constant inverse depth value
     else:
         inv_depth_norm = np.zeros_like(inv_depth)
+
+    # Clamp normalized values just in case of numerical instability
+    inv_depth_norm = np.clip(inv_depth_norm, 0.0, 1.0)
     
     # Convert to 16-bit unsigned integer
     depth_16bit = (inv_depth_norm * 65535).astype(np.uint16)
@@ -100,7 +120,7 @@ def convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_d
     # Ensure background pixels stay black (0)
     depth_16bit[background_mask] = 0
     
-    return depth_16bit
+    return depth_16bit, scale, offset
 
 def read_colmap_data(images_bin_path, images_depths_bin_path=None):
     """
@@ -263,12 +283,17 @@ def create_white_mask(depth_image_shape):
 
 def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     """
-    Process all depth maps, rename them according to COLMAP naming, and save them in the right structure.
+    Process all depth maps, rename them according to COLMAP naming, 
+    and save them in the right structure, and collect the calculated
+    scale/offset parameters.
     
     Args:
         project_dir: Root project directory containing the COLMAP data
         min_depth: Minimum depth value to consider
         max_depth: Maximum depth value to consider
+    
+        Returns:
+            calculated_depth_params: Dictionary mapping base image names to {"scale": scale, "offset": offset}
     """
     # Define paths
     colmap_images_bin = os.path.join(project_dir, "camera_calibration", "aligned", "sparse", "0", "images.bin")
@@ -291,7 +316,10 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
         print(f"Created mapping for {len(mapping)} images")
     except Exception as e:
         print(f"Error reading COLMAP files: {e}")
-        return
+        return {}
+
+    # Dictionary to store calculated parameters
+    calculated_depth_params = {}
     
     # Get list of all PNG files in the input directory
     input_files = [f for f in os.listdir(input_depth_dir) if f.lower().endswith('.png')]
@@ -309,6 +337,9 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
             print(f"  Skipping {filename}: No matching COLMAP image found")
             skipped_files += 1
             continue
+
+        # Get the base name used as key in depth_params.json (e.g., camX/image)
+        output_filename_base = os.path.splitext(output_filename)[0]
         
         # Read the input depth map
         input_path = os.path.join(input_depth_dir, filename)
@@ -323,8 +354,11 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
         depth_in_meters, background_mask = convert_depth_map_to_meters(depth_image)
         
         # Convert to Gaussian Splatting format
-        depth_16bit = convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_depth, max_depth)
+        depth_16bit, scale, offset = convert_to_gaussian_splatting_format(depth_in_meters, background_mask, min_depth, max_depth)
         
+        # Store the calculated parameters
+        calculated_depth_params[output_filename_base] = {"scale": scale, "offset": offset}
+
         # Determine output path including camera directory
         cam_dir = os.path.dirname(output_filename)
         full_cam_dir = os.path.join(output_depth_dir, cam_dir)
@@ -355,6 +389,8 @@ def process_depth_maps(project_dir, min_depth=0.1, max_depth=None):
     print(f"Processed {processed_files} depth maps, skipped {skipped_files} depth maps")
     print(f"Created {white_masks_created} white masks (for depth only images)")
 
+    return calculated_depth_params
+
 def find_chunks(project_dir):
     """
     Find all chunks in the project directory.
@@ -380,82 +416,114 @@ def find_chunks(project_dir):
     
     return chunks
 
-def create_depth_params_json(chunk_dir):
+def write_depth_params_for_model(model_dir, all_calculated_params, default_scale=0.0, default_offset=0.0):
     """
-    Create a depth_params.json file for a specific chunk.
-    
+    Creates the depth_params.json file for a specific COLMAP model directory
+    (e.g., a chunk or the aligned model) using pre-calculated scale/offset values.
+
     Args:
-        chunk_dir: Path to the chunk directory
-    
+        model_dir: Path to the COLMAP model directory (containing images.bin/images_depths.bin).
+        all_calculated_params: Dictionary mapping base image names to {"scale": scale, "offset": offset}.
+        default_scale: Scale value to use if an image is not found in calculated_params.
+        default_offset: Offset value to use if an image is not found in calculated_params.
+
     Returns:
-        Number of entries in the created depth_params.json file
+        Number of entries written to the depth_params.json file.
     """
-    sparse_dir = os.path.join(chunk_dir, "sparse", "0")
+    sparse_dir = os.path.join(model_dir, "sparse", "0")
     images_bin_path = os.path.join(sparse_dir, "images.bin")
-    images_depths_bin_path = os.path.join(sparse_dir, "images_depths.bin")
-    
+    images_depths_bin_path = os.path.join(sparse_dir, "images_depths.bin") # Optional
+
+    # Check if at least one COLMAP image file exists
     if not os.path.exists(images_bin_path) and not os.path.exists(images_depths_bin_path):
-        print(f"Skipping chunk {os.path.basename(chunk_dir)}: Neither images.bin nor images_depths.bin found")
+        print(f"Skipping {os.path.basename(model_dir)}: Neither images.bin nor images_depths.bin found in {sparse_dir}")
         return 0
-    
-    # Read image data from both COLMAP files
+
+    print(f"Generating depth_params.json for: {sparse_dir}")
+
+    # Read image data from COLMAP files to get the list of image names
+    colmap_images = {}
+    next_id = 0
+
     try:
-        image_data, _ = read_colmap_data(images_bin_path, images_depths_bin_path)
+        # Read images.bin and assign incremental IDs
+        if os.path.exists(images_bin_path):
+            images_bin_data = read_images_binary(images_bin_path)
+            for _, image_data in images_bin_data.items():
+                colmap_images[next_id] = image_data
+                next_id += 1
+            print(f" Read {len(images_bin_data)} images from images.bin")
+            
+        # Read images_depths.bin and continue with incremental IDs
+        if os.path.exists(images_depths_bin_path):
+            images_depths_data = read_images_binary(images_depths_bin_path)
+            for _, image_data in images_depths_data.items():
+                colmap_images[next_id] = image_data
+                next_id += 1
+            print(f" Read {len(images_depths_data)} images from images_depths.bin")
     except Exception as e:
-        print(f"Error reading COLMAP data for chunk {os.path.basename(chunk_dir)}: {e}")
+        print(f" Error reading COLMAP image data for {os.path.basename(model_dir)}: {e}")
         return 0
-    
-    # Create depth parameters for all images
-    depth_params = {}
-    for image_id, data in image_data.items():
-        # Get the image name without extension
-        image_name = os.path.splitext(data['name'])[0]
-        depth_params[image_name] = {"scale": 1.0, "offset": 0.0}
-    
+
+    # Create depth parameters dictionary
+    depth_params_output = {}
+    found_count = 0
+    not_found_count = 0
+
+    for _, data in colmap_images.items():
+        # Get the base image name (e.g., "cam0/00000_WE931VUJ_b1")
+        image_name_base = os.path.splitext(data.name)[0]
+
+        # Look up the calculated parameters
+        params = all_calculated_params.get(image_name_base)
+
+        if params is not None:
+            depth_params_output[image_name_base] = params
+            found_count += 1
+        else:
+            # Use default values if parameters were not calculated (e.g., depth file missing/error)
+            depth_params_output[image_name_base] = {"scale": default_scale, "offset": default_offset}
+            not_found_count += 1
+            # print(f"  Warning: No calculated params found for {image_name_base}. Using defaults.")
+
+    # Reorder the dictionary in alphabetical order of keys
+    depth_params_output = dict(sorted(depth_params_output.items(), key=lambda x: x[0]))
+
     # Save the depth_params.json file
     depth_params_path = os.path.join(sparse_dir, "depth_params.json")
-    with open(depth_params_path, "w") as f:
-        json.dump(depth_params, f, indent=2)
-    
-    print(f"Created depth_params.json for chunk {os.path.basename(chunk_dir)} with {len(depth_params)} entries")
-    return len(depth_params)
+    try:
+        with open(depth_params_path, "w") as f:
+            json.dump(depth_params_output, f, indent=4) # Use indent 4 for readability
+        print(f" Successfully wrote {len(depth_params_output)} entries to {depth_params_path}")
+        if not_found_count > 0:
+             print(f"   ({found_count} entries used calculated values, {not_found_count} used defaults (could be test images)")
+    except Exception as e:
+        print(f" Error writing {depth_params_path}: {e}")
+        return 0
 
-def create_depth_params_for_all_chunks(project_dir):
-    """
-    Create depth_params.json files for all chunks in the project.
-    
-    Args:
-        project_dir: Root project directory
-    """
-    chunks = find_chunks(project_dir)
-    
-    if not chunks:
-        print("No chunks found in the project directory")
-        return
-    
-    total_entries = 0
-    for chunk_dir in chunks:
-        print(f"Processing chunk: {os.path.basename(chunk_dir)}")
-        entries = create_depth_params_json(chunk_dir)
-        total_entries += entries
-    
-    # Create the depth_params.json file in the aligned directory
-    aligned_dir = os.path.join(project_dir, "camera_calibration", "aligned")
-    
-    create_depth_params_json(aligned_dir)
-    
-    print(f"Created depth_params.json files for {len(chunks)} chunks with a total of {total_entries} entries")
+    return len(depth_params_output)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert depth maps to 3D Gaussian Splatting format with COLMAP integration")
     parser.add_argument("--project_dir", required=True, help="Root project directory")
     parser.add_argument("--min_depth", type=float, default=0.1, help="Minimum depth value to consider")
     parser.add_argument("--max_depth", type=float, default=None, help="Maximum depth value to consider")
+    parser.add_argument("--default_scale", type=float, default=0.0, help="Scale value in depth_params.json if calculation fails")
+    parser.add_argument("--default_offset", type=float, default=0.0, help="Offset value in depth_params.json if calculation fails")
     
     args = parser.parse_args()
     
     # Process the depth maps
-    process_depth_maps(args.project_dir, args.min_depth, args.max_depth)
+    all_calculated_params = process_depth_maps(args.project_dir, args.min_depth, args.max_depth)
     
-    # Create depth_params.json files for all chunks
-    create_depth_params_for_all_chunks(args.project_dir)
+    aligned_model_dir = os.path.join(args.project_dir, "camera_calibration", "aligned")
+    write_depth_params_for_model(aligned_model_dir, all_calculated_params, args.default_scale, args.default_offset)
+
+    chunks = find_chunks(args.project_dir)
+    print(f"\nProcessing {len(chunks)} Chunks...")
+    total_chunk_entries = 0
+    for chunk_dir in chunks:
+        print(f" Processing Chunk: {os.path.basename(chunk_dir)}")
+        entries = write_depth_params_for_model(chunk_dir, all_calculated_params, args.default_scale, args.default_offset)
+        total_chunk_entries += entries
+    print(f"Finished processing chunks. Total entries written: {total_chunk_entries}")

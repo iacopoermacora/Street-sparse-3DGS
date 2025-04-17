@@ -112,7 +112,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_fold
             try:
                 depth_params = depths_params[extr.name[:-n_remove]]
             except:
-                print("\n", key, "not found in depths_params")
+                print("\n", key, " with name,", extr.name[:-n_remove] , "not found in depths_params")
 
         image_path = os.path.join(images_folder, extr.name)
         image_name = extr.name
@@ -189,7 +189,7 @@ def readColmapDepthOnlyCameras(path, depths_params, depths_folder, masks_folder)
             try:
                 depth_params = depths_params[extr.name[:-n_remove]]
             except:
-                print("\n", key, "not found in depths_params")
+                print("\n", key, " (depth only) with name,", extr.name[:-n_remove] , "not found in depths_params")
 
         cam_info = CameraInfo(
             uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, primx=primx, primy=primy, depth_params=depth_params, width=width, height=height,

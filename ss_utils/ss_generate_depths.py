@@ -184,11 +184,11 @@ if __name__ == "__main__":
 
     cityfusion_master_path = os.environ.get('CITYFUSION_MASTER_PATH')
 
-    # Change the permissions of the depth_files folder
-    os.chmod(os.path.join(args.project_dir, "camera_calibration", "depth_files"), 0o777)
-
     # If the stations file already exists, skip this step
     if not os.path.exists(os.path.join(args.project_dir, "camera_calibration", "depth_files", "total.stations")):
+        # Change the permissions of the depth_files folder
+        os.chmod(os.path.join(args.project_dir, "camera_calibration", "depth_files"), 0o777)
+
         json_rds_to_stations = [
                     "sudo", "docker", "run", "--rm",
                     "--gpus", "all",

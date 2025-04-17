@@ -125,7 +125,10 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
                     loss = photo_loss.clone()
                 else:
-                    loss = torch.tensor(0.0, device="cuda")
+                    Ll1 = l1_loss(gt_image, gt_image) # PACOMMENT: This loss calculation is done so that the loss is 0 but it is computed in the same way
+                    Lssim = (1.0 - ssim(gt_image, gt_image))
+                    photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
+                    loss = photo_loss.clone()
                 
                 # Depth Loss
                 Ll1depth_pure = 0.0
@@ -139,9 +142,6 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     Ll1depth = Ll1depth.item()
                 else:
                     Ll1depth = 0
-
-                if is_depth_only: # PACOMMENT: Added this condition
-                    loss = loss*2
                 
                 # # Pointcloud GT Loss
                 if dataset.gt_point_cloud_constraints and gaussians.gt_point_cloud is not None: # PACOMMENT: Added this, a thought must be made about the weights
@@ -173,7 +173,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                         return
                     
                     # Densification
-                    if iteration < opt.densify_until_iter:
+                    if not is_depth_only and iteration < opt.densify_until_iter:
                         # Keep track of max radii in image-space for pruning
                         gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii)
                         gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
