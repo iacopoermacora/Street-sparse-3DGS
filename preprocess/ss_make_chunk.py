@@ -258,14 +258,16 @@ def make_chunk(i, j, n_width, n_height):
         corner_max_for_pts[1] = 1e12
 
     mask = np.all(xyzsC < corner_max_for_pts, axis=-1) * np.all(xyzsC > corner_min_for_pts, axis=-1)
-    new_xyzs = xyzsC[mask]
-    new_colors = colorsC[mask]
-    new_indices = indicesC[mask]
-    new_errors = errorsC[mask]
+    colmap_xyzs = xyzsC[mask]
+    colmap_colors = colorsC[mask]
+    colmap_indices = indicesC[mask]
+    colmap_errors = errorsC[mask]
 
-    new_colors = np.clip(new_colors, 0, 255).astype(np.uint8)
+    colmap_colors = np.clip(colmap_colors, 0, 255).astype(np.uint8)
 
     valid_cam = np.all(cam_centers < corner_max, axis=-1) * np.all(cam_centers > corner_min, axis=-1)
+
+    print(f"Valid cameras before visibility-base selection: {valid_cam.sum()}")
 
     box_center = (corner_max + corner_min) / 2
     extent = (corner_max - corner_min) / 2
@@ -280,10 +282,10 @@ def make_chunk(i, j, n_width, n_height):
 
         # If within chunk
         if np.all(cam_centers[cam_idx] < corner_max) and np.all(cam_centers[cam_idx] > corner_min):
-            valid_cam[cam_idx] = n_pts > 50
+            valid_cam[cam_idx] = True # PACOMMENT: Removed limit of 50 points because with our sparse data the points are not enough
         # If within 2x of the chunk
         elif np.all(cam_centers[cam_idx] < extended_corner_max) and np.all(cam_centers[cam_idx] > extended_corner_min):
-            valid_cam[cam_idx] = n_pts > 50 and random.uniform(0, 1) > 0.5
+            valid_cam[cam_idx] = n_pts > 20 # PACOMMENT: Removed limit of 50 points because with our sparse data the points are not enough
         # All distances
         if (not valid_cam[cam_idx]) and n_pts > 10 and args.add_far_cams:
             valid_cam[cam_idx] = random.uniform(0, 0.5) < (float(n_pts) / len(image_points3d))
@@ -305,22 +307,55 @@ def make_chunk(i, j, n_width, n_height):
         out_colmap = os.path.join(out_path, "sparse", "0")
         os.makedirs(out_colmap, exist_ok=True)
 
-        # must remove sfm points to use colmap triangulator in following steps
+        # Create output images while keeping the original points
         images_out = {}
         for key in valid_keys:
             image_meta = images_metas[key]
+        
+            # Get the original points and their 2D locations
+            pts_idx = image_meta.point3D_ids
+            xys = image_meta.xys
+            
+            # Create a mask for valid points (non-negative IDs)
+            valid_pts_mask = pts_idx >= 0
+
+            # Initialize in_chunk_mask with all False
+            in_chunk_mask = np.zeros_like(pts_idx, dtype=bool)
+            
+            # If there are valid points, check which ones are in this chunk
+            if np.any(valid_pts_mask):
+                # Get valid point IDs
+                valid_point_ids = pts_idx[valid_pts_mask]
+                
+                # For each valid point ID, check if it's in the chunk
+                for i_pt, pt_id in enumerate(valid_point_ids):
+                    # Get the index in the original mask
+                    orig_idx = np.where(valid_pts_mask)[0][i_pt]
+                    
+                    # If point exists in points3d
+                    if pt_id in points3d:
+                        pt_xyz = points3d[pt_id].xyz
+                        # Check if point is in chunk
+                        if (np.all(pt_xyz < corner_max_for_pts) and 
+                            np.all(pt_xyz > corner_min_for_pts)):
+                            in_chunk_mask[orig_idx] = True
+            
+            # Filter to keep only points in this chunk
+            filtered_xys = xys[in_chunk_mask]
+            filtered_point3D_ids = pts_idx[in_chunk_mask]
+            
             images_out[key] = Image(
-                id = key,
-                qvec = image_meta.qvec,
-                tvec = image_meta.tvec,
-                camera_id = image_meta.camera_id,
-                name = image_meta.name,
-                xys = [],
-                point3D_ids = []
+                id=key,
+                qvec=image_meta.qvec,
+                tvec=image_meta.tvec,
+                camera_id=image_meta.camera_id,
+                name=image_meta.name,
+                xys=filtered_xys,
+                point3D_ids=filtered_point3D_ids
             )
 
             if os.path.exists(test_file) and image_meta.name in blending_dict:
-                n_pts = np.isin(image_meta.point3D_ids, new_indices).sum()
+                n_pts = np.isin(image_meta.point3D_ids, colmap_indices).sum()
                 blending_dict[image_meta.name][f"{i}_{j}"] = str(n_pts)
         
         center = (corner_min + corner_max) / 2
@@ -337,26 +372,43 @@ def make_chunk(i, j, n_width, n_height):
         # Filter LiDAR points for the chunk
         print("Reading LiDAR points")
         LiDAR_path = f"{args.project_dir}/ss_raw_images/LiDAR"
-        chunk_xyzs, chunk_colors, combined_pcd = process_lidar_points(LiDAR_path, center, extent, out_path)
+        lidar_xyzs, lidar_colors, combined_pcd = process_lidar_points(LiDAR_path, center, extent, out_path)
 
-        if chunk_xyzs is None:
-            chunk_xyzs = new_xyzs
-            chunk_colors = new_colors
-
-        # Generate new unique IDs for points
-        new_indices = np.arange(len(chunk_xyzs))
-
-        points_out = {
-            new_indices[idx] : Point3D(
-                    id=new_indices[idx],
-                    xyz=chunk_xyzs[idx],
-                    rgb=chunk_colors[idx],
-                    error=0.0,  # No error
-                    image_ids=np.array([]),
-                    point2D_idxs=np.array([]),
+        # Create points dictionary for output, including both COLMAP and LiDAR points
+        points_out = {}
+        
+        # First add all the original COLMAP points
+        for idx, original_id in enumerate(colmap_indices):
+            if original_id in points3d:
+                point = points3d[original_id]
+                # Keep original point with all its properties
+                points_out[original_id] = Point3D(
+                    id=original_id,
+                    xyz=colmap_xyzs[idx],
+                    rgb=colmap_colors[idx],
+                    error=colmap_errors[idx],
+                    image_ids=point.image_ids,
+                    point2D_idxs=point.point2D_idxs,
                 )
-            for idx in range(len(chunk_xyzs))
-        }
+        
+        # Then add LiDAR points with new IDs that don't conflict
+        if lidar_xyzs is not None and len(lidar_xyzs) > 0:
+            # Find the maximum ID in the original points
+            max_id = max(points3d.keys()) if points3d else 0
+            
+            # Add LiDAR points with new IDs starting after max_id
+            for idx in range(len(lidar_xyzs)):
+                new_id = max_id + idx + 1
+                points_out[new_id] = Point3D(
+                    id=new_id,
+                    xyz=lidar_xyzs[idx],
+                    rgb=lidar_colors[idx],
+                    error=0.0,  # No error for LiDAR points
+                    image_ids=np.array([]),  # No image associations
+                    point2D_idxs=np.array([]),  # No image associations
+                )
+        
+        print(f"Writing chunk {i}_{j} with {len(images_out)} images and {len(points_out)} points")
 
         write_model(cam_intrinsics, images_out, points_out, out_colmap, f".{args.model_type}")
     else:
@@ -373,7 +425,7 @@ if __name__ == '__main__':
     parser.add_argument('--images_dir', required=True)
     parser.add_argument('--chunk_size', default=100, type=float)
     parser.add_argument('--min_padd', default=0.2, type=float)
-    parser.add_argument('--min_n_cams', default=50, type=int) # 100 NOTE: Changed from 100 to 50
+    parser.add_argument('--min_n_cams', default=5, type=int) # 100 NOTE: Changed from 100 to 5
     parser.add_argument('--max_n_cams', default=1500, type=int) # 1500
     parser.add_argument('--output_path', required=True)
     parser.add_argument('--add_far_cams', default=True)
