@@ -275,6 +275,8 @@ def readColmapSceneInfo(path, images, masks, depths, eval, train_test_exp, addit
                 med_scale = 0
             for key in depths_params:
                 depths_params[key]["med_scale"] = med_scale
+            
+            print("DEPTH MEDIAN SCALE: ", med_scale)
 
         except FileNotFoundError:
             print(f"Error: depth_params.json file not found at path '{depth_params_file}'.")

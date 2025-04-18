@@ -81,11 +81,12 @@ class Camera(nn.Module):
             else:
                 self.depth_mask = torch.ones_like(self.invdepthmap > 0)
             
-            if depth_params["scale"] < 0.2 * depth_params["med_scale"] or depth_params["scale"] > 5 * depth_params["med_scale"]: 
-                self.depth_mask *= 0
-            else:
-                self.depth_reliable = True
-
+            # if depth_params["scale"] < 0.2 * depth_params["med_scale"] or depth_params["scale"] > 5 * depth_params["med_scale"]: 
+            #     self.depth_mask *= 0
+            # else:
+            #     self.depth_reliable = True # PACOMMENT: I commented this out to avoid depth reliability check as superfluous and harmful in our case
+            self.depth_reliable = True
+            
         self.zfar = 100.0
         self.znear = 0.01
 
