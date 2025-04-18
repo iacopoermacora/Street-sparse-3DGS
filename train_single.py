@@ -125,9 +125,10 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
                     loss = photo_loss.clone()
                 else:
-                    Ll1 = l1_loss(gt_image, gt_image) # PACOMMENT: This loss calculation is done so that the loss is 0 but it is computed in the same way
+                    gt_image = torch.zeros_like(invDepth) # PACOMMENT: This loss calculation is done so that the loss is 0 but it is computed in the same way
+                    Ll1 = l1_loss(gt_image, gt_image)
                     Lssim = (1.0 - ssim(gt_image, gt_image))
-                    photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
+                    photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim
                     loss = photo_loss.clone()
                 
                 # Depth Loss
