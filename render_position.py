@@ -21,17 +21,21 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
 
     # --- Find first group of cameras with same position (T) ---
     grouped = {}
+    z_positions = []
     for cam in cameras:
         camera_center = cam.camera_center.cpu().numpy()
-        print(f"Camera T: {camera_center}")
+        z_positions.append(camera_center[2])
         key = tuple(np.round(camera_center, decimals=2))
         grouped.setdefault(key, []).append(cam)
     
-    print(f"Grouped before filtering: {grouped}")
+    average_z = np.mean(z_positions)
+
+    # Order the groups by the key value
+    grouped = {k: v for k, v in sorted(grouped.items(), key=lambda item: item[0])}
 
     # Take the first group with 6 cameras
-    grouped = {k: v for k, v in grouped.items() if len(v) > 1}
-    print(f"Found {len(grouped)} groups of cameras with >1 views")
+    grouped = {k: v for k, v in grouped.items() if len(v) == 10}
+    print(f"Found {len(grouped)} groups of cameras with 10 views")
     chosen_key = next(iter(grouped))  # take the first group
     group = grouped[chosen_key]
     print(f"Using camera group with center = {chosen_key}, {len(group)} views")
@@ -40,8 +44,11 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
     os.makedirs(out_dir, exist_ok=True)
 
     for cam in tqdm(group):
+        new_x_trans = new_x + (- cam.camera_center[0].item())
+        new_y_trans = new_y + (- cam.camera_center[1].item())
+        new_z_trans = average_z + (- cam.camera_center[2].item())
         # Modify the camera position only on x and y
-        cam.trans = np.array([new_x, new_y, 0.0])
+        cam.trans = np.array([new_x_trans, new_y_trans, new_z_trans])
         cam.world_view_transform = torch.tensor(
             getWorld2View2(cam.R, cam.T, cam.trans, cam.scale)
         ).transpose(0, 1).to(cam.data_device)
@@ -106,7 +113,7 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
             use_trained_exp=False
         )["render"], 0.0, 1.0)
 
-        out_path = os.path.join(out_dir, cam.image_name.split("/")[1].split(".")[0] + ".png")
+        out_path = os.path.join(out_dir, str(new_x) + "_" + str(new_y) + "_" + cam.image_name.split(".")[0].split("_")[-1] + ".png")
         torchvision.utils.save_image(image, out_path)
 
 if __name__ == "__main__":
