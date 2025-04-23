@@ -49,6 +49,8 @@ def add_item(image, cameras, output):
     }
     output["imgs"].append(entry)
 
+    return entry
+
 def convert_colmap_bin_to_json(model_dir, output_file):
     """
     Reads COLMAP binary model files from model_dir (expecting cameras.bin and images.bin)
@@ -74,6 +76,7 @@ def convert_colmap_bin_to_json(model_dir, output_file):
 
     # List of accepted faces
     accepted_faces = ["f1", "l1", "r1", "b1", "u1", "u2"]
+    f1_image_counter = 0
     
     # Process images
     for image_id, image in images.items():
@@ -81,7 +84,43 @@ def convert_colmap_bin_to_json(model_dir, output_file):
         # Extract the face name from the image name
         face_name = image.name.split("_")[-1].split(".")[0]
         if face_name in accepted_faces:
-            add_item(image, cameras, output)
+            added_entry = add_item(image, cameras, output)
+        
+             # If we have processed two 'f1' images, add the synthetic one
+            if f1_image_counter == 2:
+                print(f"Adding synthetic camera after processing second f1 image: {image.name}")
+                # Use the data from the *last added* entry (which corresponds to this image)
+                original_C = np.array(added_entry["C"])
+                original_K = added_entry["K"]
+                original_width = added_entry["width"]
+                original_height = added_entry["height"]
+
+                # Calculate new position (5 units higher, assuming Z is up)
+                # Ensure you modify the correct axis (0=X, 1=Y, 2=Z)
+                new_C = original_C + np.array([0.0, 0.0, 5.0]) # Adjust axis if needed
+
+                # Define rotation matrix for pointing straight down
+                # Camera Z along world -Z, Camera Y along world -Y, Camera X along world X
+                new_R = [
+                    [1.0,  0.0,  0.0],
+                    [0.0, -1.0,  0.0],
+                    [0.0,  0.0, -1.0]
+                ]
+
+                # Create the synthetic camera entry
+                synthetic_entry = {
+                    "C": new_C.tolist(),
+                    "K": original_K, # Use the same intrinsics
+                    "R": new_R,
+                    "width": original_width,
+                    "height": original_height,
+                    "name": f"synthetic_down_{image.name}", # Give it a distinct name
+                    "synthetic": True # Add a flag to identify synthetic cameras
+                }
+                output["imgs"].append(synthetic_entry)
+
+                # Reset the counter
+                f1_image_counter = 0
     
     # Process images_depth
     for image_id, image in images_depth.items():

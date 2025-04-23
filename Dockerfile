@@ -11,10 +11,7 @@ RUN apt-get update && \
         libsm6 libxext6 python3-opencv gcc-11 g++-11 cmake \
         libboost-dev libpython3-dev pybind11-dev \
         zlib1g-dev openctm-tools libopenctm-dev \
-        xauth x11-apps
-
-# Install Docker CLI only (not Docker Engine)
-RUN apt-get install -y --no-install-recommends docker.io
+        xauth x11-apps swig docker.io
 
 # conda
 ENV PATH=/opt/conda/bin:$PATH 
@@ -23,6 +20,9 @@ RUN wget --quiet \
     echo 'export PATH=/opt/conda/bin:$PATH' > /etc/profile.d/conda.sh && \
     /bin/bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
     rm -rf /tmp/*
+
+# Install FAISS using conda (place this after the conda installation)
+RUN /opt/conda/bin/conda install -y -c conda-forge python=3.10 faiss-gpu==1.7.4
 
 # Create the user
 RUN addgroup --gid $GROUP_ID user

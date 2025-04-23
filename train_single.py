@@ -145,11 +145,11 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     Ll1depth = 0
                 
                 # # Pointcloud GT Loss
-                if dataset.gt_point_cloud_constraints and gaussians.gt_point_cloud is not None: # PACOMMENT: Added this, a thought must be made about the weights
-                    # Use visibility_filter to select only visible Gaussians
-                    visible_gaussians_xyz = gaussians._xyz[visibility_filter]
-                    _, _, wrong_points = gaussians.compare_points_to_gt(visible_gaussians_xyz)
-                    loss += wrong_points / len(visible_gaussians_xyz)
+                # if dataset.gt_point_cloud_constraints and gaussians.gt_point_cloud is not None: # PACOMMENT: Added this, a thought must be made about the weights
+                #     # Use visibility_filter to select only visible Gaussians
+                #     visible_gaussians_xyz = gaussians._xyz[visibility_filter]
+                #     _, _, wrong_points = gaussians.compare_points_to_gt(visible_gaussians_xyz)
+                #     loss += wrong_points / len(visible_gaussians_xyz)
 
                 loss.backward()
                 iter_end.record()

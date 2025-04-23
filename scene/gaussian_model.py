@@ -24,7 +24,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from gaussian_hierarchy._C import load_hierarchy, write_hierarchy
 from scene.OurAdam import Adam
 
-#import faiss
+import faiss
 import time
 
 class GaussianModel:
@@ -73,6 +73,10 @@ class GaussianModel:
         self.skybox_locked = True
 
         self.gt_point_cloud = None # PACOMMENT: Added this to store the ground truth point cloud
+        self.gt_x_min = None
+        self.gt_x_max = None
+        self.gt_y_min = None
+        self.gt_y_max = None
         if gt_point_cloud_path and os.path.exists(gt_point_cloud_path):
             self.load_gt_point_cloud(gt_point_cloud_path)
 
@@ -644,10 +648,6 @@ class GaussianModel:
         rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
         new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
 
-        if gt_point_cloud_constraints:
-            # PACOMMENT: Inserted here the filtering of the points that are too far from the gt
-            new_xyz, selected_pts_mask, _ = self.compare_points_to_gt(new_xyz)
-
         new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
         new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
@@ -685,10 +685,14 @@ class GaussianModel:
 
         self.densify_and_clone(grads, max_grad, extent)
         self.densify_and_split(grads, max_grad, extent, gt_point_cloud_constraints)
-
+        
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if self.scaffold_points is not None:
             prune_mask[:self.scaffold_points] = False
+        
+        # INSERT HERE MODIFIED COMPARE_POINTS_TO_GT TO PRUNE POINTS FURTHER THAN 1CM FROM GT
+        if gt_point_cloud_constraints is not None:
+            prune_mask = self.compare_points_to_gt(prune_mask)
 
         self.prune_points(prune_mask)
 
@@ -713,10 +717,20 @@ class GaussianModel:
                         np.asarray(plydata.elements[0]["z"])),  axis=1)
         
         xyz = xyz.astype(np.float32)
+
+        self.gt_x_min = np.min(xyz[:, 0])
+        self.gt_x_max = np.max(xyz[:, 0])
+        self.gt_y_min = np.min(xyz[:, 1])
+        self.gt_y_max = np.max(xyz[:, 1])
         
         print(f"Loaded {xyz.shape[0]} points from ground truth")
+        print(f"X range: {self.gt_x_min} to {self.gt_x_max}")
+        print(f"Y range: {self.gt_y_min} to {self.gt_y_max}")
         
         dimension = 3  # 3D points
+
+        print("Ground Truth Sample:", xyz[:10])
+        print("Comparing Sample:", self.get_xyz.detach().cpu().numpy()[:10])
         
         try:
             # Check if FAISS was built with GPU support
@@ -747,51 +761,72 @@ class GaussianModel:
         
         print(f"FAISS index created with {xyz.shape[0]} points")
 
-    def compare_points_to_gt(self, new_xyz):
+    def compare_points_to_gt(self, existing_mask=None):
         """
-        Only keep points that are within a distance threshold of the ground truth point cloud.
+        Generate a mask for points that are further than the threshold distance from the ground truth point cloud.
         
         Args:
-            new_xyz: The new points to filter (tensor on GPU)
-            
+            existing_mask: Optional existing mask to combine with the distance-based mask
+                
         Returns:
-            - filtered_xyz: Tensor of points that are close to ground truth
-            - mask: Boolean mask indicating which points to keep
-            - num_discarded: Number of points that were filtered out
+            prune_mask: Boolean mask where True indicates points that should be pruned
+                    (further than threshold from ground truth AND not in scaffold)
         """
-        print("Filtering points based on distance to ground truth point cloud")
+        print("Checking point distances to ground truth point cloud for pruning")
 
+        if self.gt_point_cloud is None:
+            print("No ground truth point cloud available, skipping distance-based pruning")
+            return existing_mask if existing_mask is not None else torch.zeros(self.get_xyz.shape[0], dtype=bool, device="cuda")
+        
         start_time = time.time()
         
-        distance_threshold = 0.01  # 1 cm threshold
+        distance_threshold = 0.1  # 10 cm threshold
+        
+        # Get current points
+        xyz = self.get_xyz.detach()
         
         # Convert tensor to numpy for FAISS
-        new_xyz_np = new_xyz.detach().cpu().numpy().astype(np.float32)
+        xyz_np = xyz.cpu().numpy().astype(np.float32)
         
         print(f"Searching for nearest neighbors in the ground truth point cloud...")
         
         # Search for nearest neighbors
-        distances, _ = self.gt_point_cloud.search(new_xyz_np, k=1)
+        distances, _ = self.gt_point_cloud.search(xyz_np, k=1)
         
         print(f"Found nearest neighbors in the ground truth point cloud")
         
-        # Create mask for points that have neighbors within the threshold
+        # Create mask for points that are TOO FAR from ground truth (to be pruned)
         # FAISS returns squared L2 distances
-        mask = distances[:, 0] <= distance_threshold**2
+
+        distance_prune_mask = np.sqrt(distances[:, 0]) > distance_threshold
         
         # Convert mask to torch tensor
-        mask_tensor = torch.from_numpy(mask).to(new_xyz.device)
-        
-        # Filter points using the mask
-        filtered_xyz = new_xyz[mask_tensor]
-        
-        # Count how many points were discarded
-        num_discarded = len(new_xyz) - mask.sum()
-        
-        print(f"Filtered {num_discarded} points out of {len(new_xyz)}")
+        distance_prune_mask = torch.from_numpy(distance_prune_mask).to(xyz.device)
 
-        print("$"*100)
-        print(f"The LiDAR constraint took {time.time() - start_time:.2f} seconds")
-        print("$"*100)
+        # Make a mask of the points that are within the gt bounds
+        within_gt_bounds_mask = (
+                 (self.get_xyz[:, 0] >= self.gt_x_min) & (self.get_xyz[:, 0] <= self.gt_x_max) &
+                 (self.get_xyz[:, 1] >= self.gt_y_min) & (self.get_xyz[:, 1] <= self.gt_y_max)
+             )
 
-        return filtered_xyz, mask_tensor, num_discarded
+        # Count how many points are within the bounds
+        print(f"Number of points within GT bounds: {torch.sum(within_gt_bounds_mask).item()} out of {len(xyz)}")
+
+        # Combine the distance mask with the bounds mask to not prune outside points
+        distance_prune_mask = torch.logical_and(distance_prune_mask, within_gt_bounds_mask)
+        
+        # If there's an existing mask, combine it with our distance-based mask (logical OR)
+        if existing_mask is not None:
+            combined_prune_mask = torch.logical_or(existing_mask, distance_prune_mask)
+        else:
+            combined_prune_mask = distance_prune_mask
+        
+        # Count how many additional points will be pruned due to distance constraint
+        additional_pruned = torch.sum(distance_prune_mask & ~(existing_mask if existing_mask is not None else torch.zeros_like(distance_prune_mask))).item()
+        total_pruned = torch.sum(combined_prune_mask).item()
+        
+        print(f"Distance constraint will prune additional {additional_pruned} points")
+        print(f"Total points to be pruned: {total_pruned} out of {len(xyz)}")
+        print(f"Distance checking took {time.time() - start_time:.2f} seconds")
+        
+        return combined_prune_mask
