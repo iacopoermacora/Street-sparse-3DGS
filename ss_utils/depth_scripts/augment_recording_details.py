@@ -105,7 +105,7 @@ def extract_image_names_from_colmap(images):
     print(f"Found {len(image_names)} unique ImageIds in COLMAP data")
     return image_names, image_name_to_id_map
 
-def is_point_in_chunk(x, y, z, center_x, center_y, center_z, extent_x, extent_y, extent_z):
+def is_point_in_chunk(x, y, z, center_x, center_y, center_z, extent_x, extent_y, extent_z): # NOTE: This function is not used anymore
     """Check if a point is within the chunk boundaries.
     
     Args:
@@ -121,7 +121,7 @@ def is_point_in_chunk(x, y, z, center_x, center_y, center_z, extent_x, extent_y,
             abs(y - center_y) <= extent_y/2 and 
             abs(z - center_z) <= extent_z/2)
 
-def read_center_and_extent(center_path, extent_path):
+def read_center_and_extent(center_path, extent_path): # NOTE: This function is not used anymore
     """Read center and extent values from files.
     
     Args:
@@ -229,56 +229,78 @@ def calculate_translation(rotation_matrix, position):
     
     return translation.flatten()
 
-def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_name_to_id_map, len_all_augmented_images, center, extent, translation, faces):
+def parse_iso_timestamp(timestamp_str):
+    """
+    Parse ISO format timestamp strings that may have variable precision in fractional seconds.
+    
+    Args:
+        timestamp_str (str): ISO format timestamp string, e.g. "2023-10-23T10:30:32.24Z"
+        
+    Returns:
+        datetime: Parsed datetime object
+    """
+    # Check if the timestamp ends with 'Z' and replace it with '+00:00'
+    if timestamp_str.endswith('Z'):
+        timestamp_str = timestamp_str[:-1] + "+00:00"
+    
+    # If there's no timezone information, add '+00:00'
+    if not (timestamp_str.endswith('+00:00') or timestamp_str.endswith('-00:00')):
+        timestamp_str += "+00:00"
+    
+    # Handle the case where we might have less than 6 digits for microseconds
+    if '.' in timestamp_str:
+        # Split at the decimal point
+        main_part, frac_part = timestamp_str.split('.')
+        
+        # Split the fractional part at the timezone indicator if present
+        if '+' in frac_part:
+            frac_digits, timezone = frac_part.split('+', 1)
+            frac_part = frac_digits.ljust(6, '0') + '+' + timezone
+        elif '-' in frac_part:
+            frac_digits, timezone = frac_part.split('-', 1)
+            frac_part = frac_digits.ljust(6, '0') + '-' + timezone
+        else:
+            frac_part = frac_part.ljust(6, '0')
+        
+        timestamp_str = f"{main_part}.{frac_part}"
+    
+    return datetime.fromisoformat(timestamp_str)
+
+def interpolate_recordings(json_data, all_image_names, image_name_to_id_map, translation, faces):
     """
     Process the recordings and insert new ones based on multiple criterias.
-    Filter recordings to include only those present in COLMAP for this chunk
+    Filter recordings to include only those present in COLMAP
     but check against all COLMAP image IDs for uniqueness.
     Keep only augmented images within chunk boundaries.
 
     Args:
         json_data (dict): JSON data containing recording properties.
-        chunk_image_names (set): Set of image names in the current chunk.
         all_image_names (set): Set of all image names.
         image_name_to_id_map (dict): Mapping from image names to IDs.
-        len_all_augmented_images (int): Length of the augmented images dictionary.
-        center (list): Center coordinates of the chunk.
-        extent (list): Extent of the chunk in each dimension.
         translation (tuple): Translation values for x and y axes.
         faces (list): List of camera faces to consider.
     Returns:
         tuple: A tuple containing new recordings, augmented COLMAP images, updated all_image_names, and image_name_to_id_map.
     """
+
     recordings = json_data["RecordingProperties"]
-    # Filter recordings to include only those present in COLMAP for this chunk
-    filtered_recordings = [rec for rec in recordings if rec["ImageId"] in chunk_image_names]
-    
-    print(f"Filtered {len(filtered_recordings)} recordings out of {len(recordings)} total for this chunk")
-    
+
     # Sort recordings by timestamp
-    filtered_recordings.sort(key=lambda x: datetime.fromisoformat(x["RecordingTimeGps"].replace('Z', '+00:00')))
-    
-    # # Use all existing image IDs for uniqueness check TODO: Check if this is necessary otherwise remove
-    # existing_ids = {rec["ImageId"] for rec in recordings}
-    # existing_ids.update(all_image_names)
+    recordings.sort(key=lambda x: parse_iso_timestamp(x['RecordingTimeGps']))
     
     new_recordings = []
     augmented_colmap_images = {}
-    
-    center_x, center_y, center_z = center
-    extent_x, extent_y, extent_z = extent
     x_translation, y_translation = translation
 
     colmap_position_number = 0
     # Get highest number in the map
-    colmap_station_number = max(image_name_to_id_map.values(), default=0) + 1
+    cyclomedia_station_number = max(image_name_to_id_map.values(), default=0) + 1
 
-    skipped_out_of_bounds = 0
     skipped_distance = 0
     
-    for i in range(len(filtered_recordings) - 1):
-        current = filtered_recordings[i]
-        next_rec = filtered_recordings[i + 1]
+    for i in range(len(recordings) - 1):
+        current = recordings[i]
+        next_rec = recordings[i + 1]
         
         # Calculate distance between points
         distance = calculate_distance(current["X"], current["Y"], next_rec["X"], next_rec["Y"])
@@ -307,8 +329,8 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                     new_recording[key] = current[key]
                 elif key == "RecordingTimeGps":
                     # Calculate middle timestamp
-                    time1 = datetime.fromisoformat(current["RecordingTimeGps"].replace('Z', '+00:00'))
-                    time2 = datetime.fromisoformat(next_rec["RecordingTimeGps"].replace('Z', '+00:00'))
+                    time1 = parse_iso_timestamp(current['RecordingTimeGps'])
+                    time2 = parse_iso_timestamp(next_rec['RecordingTimeGps'])
                     time_diff = (time2 - time1).total_seconds() / 2
                     middle_time = time1.timestamp() + time_diff
                     middle_datetime = datetime.fromtimestamp(middle_time).isoformat().replace('+00:00', 'Z')
@@ -320,72 +342,64 @@ def interpolate_recordings(json_data, chunk_image_names, all_image_names, image_
                     except (TypeError, ValueError):
                         # If not numeric, keep the current value
                         new_recording[key] = current[key]
+        
+            # Add the new recording and image_id to the collections
+            new_recordings.append(new_recording)
+            all_image_names.add(new_image_name)
             
-            # Check if the new point is within the chunk boundaries
-            point_x = new_recording["X"] - x_translation
-            point_y = new_recording["Y"] - y_translation
-            point_z = new_recording["Height"]  # Use Height as Z
+            # Prepare COLMAP data for this augmented image
+            # We'll create entries for each face
+            for face in faces:
+                # Compute extrinsics
+                rotation_matrix = compute_extrinsics(face, new_recording["VehicleDirection"], new_recording["Yaw"])
+                position = [new_recording["X"] - x_translation, new_recording["Y"] - y_translation, new_recording["Height"]]
+                translation_vector = calculate_translation(rotation_matrix, position)
+                
+                # Get camera number for the current face (for naming only)
+                if args.directions == '1':
+                    cam_n = {
+                        'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
+                    }[face]
+                elif args.directions == '2' or args.directions == '3':
+                    cam_n = {
+                        'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
+                    }[face]
+                elif args.directions == '4':
+                    cam_n = {
+                        'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
+                    }[face]
             
-            if is_point_in_chunk(point_x, point_y, point_z, center_x, center_y, center_z, extent_x, extent_y, extent_z):
-                # Add the new recording and image_id to the collections
-                new_recordings.append(new_recording)
-                all_image_names.add(new_image_name)
+                # Create a unique index for this augmented image if it does not already have an assigned number
+                if new_image_name not in image_name_to_id_map:
+                    image_name_to_id_map[new_image_name] = cyclomedia_station_number
+                    cyclomedia_station_number += 1
+                    idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
+                else:
+                    idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
+                image_name = f"cam{cam_n}/{idx_str}_{new_image_name}_{face}.jpg"
                 
-                # Prepare COLMAP data for this augmented image
-                # We'll create entries for each face
-                for face in faces:
-                    # Compute extrinsics
-                    rotation_matrix = compute_extrinsics(face, new_recording["VehicleDirection"], new_recording["Yaw"])
-                    position = [new_recording["X"] - x_translation, new_recording["Y"] - y_translation, new_recording["Height"]]
-                    translation_vector = calculate_translation(rotation_matrix, position)
-                    
-                    # Get camera number for the current face (for naming only)
-                    if args.directions == '1':
-                        cam_n = {
-                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
-                        }[face]
-                    elif args.directions == '2' or args.directions == '3':
-                        cam_n = {
-                            'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
-                        }[face]
-                    elif args.directions == '4':
-                        cam_n = {
-                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
-                        }[face]
+                # Convert rotation matrix to quaternion
+                qvec = rotmat2qvec(rotation_matrix)
                 
-                    # Create a unique index for this augmented image if it does not already have an assigned number
-                    if new_image_name not in image_name_to_id_map:
-                        image_name_to_id_map[new_image_name] = colmap_station_number
-                        colmap_station_number += 1
-                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
-                    else:
-                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
-                    image_name = f"cam{cam_n}/{idx_str}_{new_image_name}_{face}.jpg"
-                    
-                    # Convert rotation matrix to quaternion
-                    qvec = rotmat2qvec(rotation_matrix)
-                    
-                    # Create a COLMAP Image object that's compatible with write_model
-                    augmented_colmap_images[len_all_augmented_images + colmap_position_number] = Image(
-                        id=len_all_augmented_images + colmap_position_number,
-                        qvec=qvec,
-                        tvec=translation_vector,
-                        camera_id=1,  # Use camera ID 1 for all images
-                        name=image_name,
-                        xys=np.array([], dtype=np.float64).reshape(0, 2),
-                        point3D_ids=np.array([], dtype=np.int64)
-                    )
-                    
-                    colmap_position_number += 1
-            else:
-                skipped_out_of_bounds+=1
+                # Create a COLMAP Image object that's compatible with write_model
+                augmented_colmap_images[colmap_position_number] = Image(
+                    id=colmap_position_number,
+                    qvec=qvec,
+                    tvec=translation_vector,
+                    camera_id=1,  # Use camera ID 1 for all images
+                    name=image_name,
+                    xys=np.array([], dtype=np.float64).reshape(0, 2),
+                    point3D_ids=np.array([], dtype=np.int64)
+                )
+                
+                colmap_position_number += 1
         else:
             skipped_distance+=1
     
-    print(f"Added {len(new_recordings)} new recordings within chunk boundaries. Skipped {skipped_distance} due to distance and {skipped_out_of_bounds} due to out of bounds.")
+    print(f"Added {len(new_recordings)} new recordings. Skipped {skipped_distance} due to distance constraints")
     print(f"Created {len(augmented_colmap_images)} COLMAP image entries for augmented images")
     
-    return new_recordings, augmented_colmap_images, all_image_names, image_name_to_id_map
+    return new_recordings, augmented_colmap_images
 
 def write_colmap_images(output_path, images_dict):
     """Write COLMAP images_depths.bin file.
@@ -417,7 +431,7 @@ def write_colmap_images(output_path, images_dict):
         print(f"ERROR: Failed to write COLMAP images: {e}")
         sys.exit(1)
 
-def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, image_name_to_id_map, all_augmented_images, all_new_recordings):
+def process_model():
     """Process a single chunk. For each chunk, read the COLMAP model,
     extract image names, and interpolate recordings.
     Filter recordings to include only those present in COLMAP for this chunk
@@ -426,58 +440,56 @@ def process_chunk(chunk_folder, translation, faces, json_data, all_image_names, 
     Write COLMAP images_depths.bin for this chunk.
     Handle exceptions for robustness.
     
-    Args:
-        chunk_folder (str): Path to the chunk folder.
-        translation (tuple): Translation values for x and y axes.
-        faces (list): List of camera faces to consider.
-        json_data (dict): JSON data containing recording properties.
-        all_image_names (set): Set of all image names.
-        image_name_to_id_map (dict): Mapping from image names to IDs.
-        all_augmented_images (dict): Dictionary of augmented COLMAP images.
-        all_new_recordings (list): List of new recordings.
-    
     Returns:
-        tuple: A tuple containing new recordings, augmented COLMAP images, updated all_image_names, and image_name_to_id_map.
+        tuple: A tuple containing new recordings, augmented COLMAP images
     """
     try:
-        # Paths for this chunk
-        colmap_bin_path = os.path.join(chunk_folder, 'sparse', '0')
-        center_path = os.path.join(chunk_folder, 'center.txt')
-        extent_path = os.path.join(chunk_folder, 'extent.txt')
-        images_depths_bin_path = os.path.join(colmap_bin_path, 'images_depths.bin')
-        
-        # Read COLMAP model for this chunk
-        _, images, _ = read_colmap_model(colmap_bin_path)
-        
-        # Extract ImageIds from COLMAP images for this chunk
-        chunk_image_names, _ = extract_image_names_from_colmap(images)
-        
-        # Read center and extent
-        center, extent = read_center_and_extent(center_path, extent_path)
+        aligned_colmap_path = os.path.join(args.project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
+        aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
+        output_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_augmented.json')
+        recording_details_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_train.json')
+        translation_json_path = os.path.join(args.project_dir, 'camera_calibration', 'translation.json')
+
+        # Define the faces based on chosen directions
+        if args.directions == '1':
+            faces = ['f1', 'r1', 'b1', 'l1']
+        elif args.directions == '2':
+            faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
+        elif args.directions == '3':
+            faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
+        elif args.directions == '4':
+            faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
+
+        # Collect all image IDs (both train and test) from the entire model first
+        all_image_names, image_name_to_id_map = collect_all_image_names(args.project_dir)
+
+        # Read the input JSON file (just data of train images)
+        with open(recording_details_path, 'r') as f:
+            data = json.load(f)
+
+        # Read translation values
+        translation = read_translation_values(translation_json_path)
         
         # Process the recordings for this chunk
-        chunk_new_recordings, chunk_augmented_images, all_image_names, image_name_to_id_map = interpolate_recordings(
-            json_data, chunk_image_names, all_image_names, image_name_to_id_map, len(all_augmented_images),
-            center, extent, translation, faces
+        new_recordings, augmented_colmap_images = interpolate_recordings(
+            data, all_image_names, image_name_to_id_map, translation, faces
         )
         
-        # Add to the global collections
-        all_new_recordings.extend(chunk_new_recordings)
-        print(f"Lenght of all_augmented_images: {len(all_augmented_images)}")
-        print(f"Lenght of chunk_augmented_images: {len(chunk_augmented_images)}")
-        all_augmented_images.update(chunk_augmented_images)
-        print(f"After-merge of all_augmented_images: {len(all_augmented_images)}")
-        
         # Write COLMAP images_depths.bin for this chunk
-        write_colmap_images(images_depths_bin_path, chunk_augmented_images)
+        write_colmap_images(aligned_images_depths_path, augmented_colmap_images)
+
+         # Add all new recordings to the original data
+        data["RecordingProperties"].extend(new_recordings)
         
-        print(f"Successfully processed chunk: {os.path.basename(chunk_folder)}")
-        
-        return all_new_recordings, all_augmented_images, all_image_names, image_name_to_id_map
+        # Write the updated data to the output file
+        with open(output_path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        return
         
     except Exception as e:
-        print(f"Error processing chunk {os.path.basename(chunk_folder)}: {e}")
-        return image_name_to_id_map
+        print(f"Error processing model: {e}")
+        return 
 
 def collect_all_image_names(project_dir):
     """Collect all image names from the entire model.
@@ -502,72 +514,6 @@ def collect_all_image_names(project_dir):
     
     return all_image_names, image_name_to_id_map
 
-def main():    
-    # Define the faces based on chosen directions
-    if args.directions == '1':
-        faces = ['f1', 'r1', 'b1', 'l1']
-    elif args.directions == '2':
-        faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2']
-    elif args.directions == '3':
-        faces = ['f1', 'f2', 'r1', 'r2', 'b1', 'b2', 'l1', 'l2', 'u1', 'u2']
-    elif args.directions == '4':
-        faces = ['f1', 'r1', 'b1', 'l1', 'u1', 'u2']
-    
-    # Define paths based on project directory
-    chunks_folder = os.path.join(args.project_dir, 'camera_calibration', 'chunks')
-    recording_details_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_train.json')
-    output_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_augmented.json')
-    translation_json_path = os.path.join(args.project_dir, 'camera_calibration', 'translation.json')
-    aligned_colmap_path = os.path.join(args.project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
-    aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
-    
-    try:
-        # Read the input JSON file (just data of train images)
-        with open(recording_details_path, 'r') as f:
-            data = json.load(f)
-        
-        # Read translation values
-        translation = read_translation_values(translation_json_path)
-        
-        # Collect all image IDs (both train and test) from the entire model first
-        all_image_names, image_name_to_id_map = collect_all_image_names(args.project_dir)
-        
-        # Collections for all augmented data
-        all_new_recordings = []
-        all_augmented_images = {}
-        
-        # Get all chunk folders
-        chunk_folders = [os.path.join(chunks_folder, d) for d in os.listdir(chunks_folder) 
-                         if os.path.isdir(os.path.join(chunks_folder, d)) and '_' in d]
-        
-        # Process each chunk
-        for chunk_folder in tqdm(chunk_folders, desc="Processing chunks"):
-            all_new_recordings, all_augmented_images, all_image_names, image_name_to_id_map = process_chunk(
-                chunk_folder, translation, faces, 
-                data, all_image_names, image_name_to_id_map,
-                all_augmented_images, all_new_recordings
-            )
-        
-        # Add all new recordings to the original data
-        data["RecordingProperties"].extend(all_new_recordings)
-        
-        # Write the updated data to the output file
-        with open(output_path, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        # Write COLMAP images_depths.bin for the whole model
-        write_colmap_images(aligned_images_depths_path, all_augmented_images)
-        
-        print(f"Successfully processed all chunks and saved to {output_path}")
-        print(f"Successfully wrote COLMAP images_depths.bin to {aligned_images_depths_path}")
-        print(f"Total new recordings added: {len(all_new_recordings)}")
-        print(f"Total augmented COLMAP images created: {len(all_augmented_images)}")
-    
-    except Exception as e:
-        import traceback
-        print(f"An error occurred: {str(e)}")
-        print(traceback.format_exc())
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
     parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
@@ -575,4 +521,4 @@ if __name__ == "__main__":
                         help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
     
     args = parser.parse_args()
-    main()
+    process_model()

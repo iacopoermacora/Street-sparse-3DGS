@@ -85,6 +85,9 @@ def convert_colmap_bin_to_json(model_dir, output_file):
         face_name = image.name.split("_")[-1].split(".")[0]
         if face_name in accepted_faces:
             added_entry = add_item(image, cameras, output)
+
+            if face_name == "f1":
+                f1_image_counter += 1
         
              # If we have processed two 'f1' images, add the synthetic one
             if f1_image_counter == 2:
@@ -97,7 +100,7 @@ def convert_colmap_bin_to_json(model_dir, output_file):
 
                 # Calculate new position (5 units higher, assuming Z is up)
                 # Ensure you modify the correct axis (0=X, 1=Y, 2=Z)
-                new_C = original_C + np.array([0.0, 0.0, 5.0]) # Adjust axis if needed
+                new_C = original_C + np.array([0.0, 0.0, 4.0]) # Adjust axis if needed
 
                 # Define rotation matrix for pointing straight down
                 # Camera Z along world -Z, Camera Y along world -Y, Camera X along world X

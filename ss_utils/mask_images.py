@@ -240,6 +240,9 @@ def process_item():
                 all_combined_masks[loop_index] = np.maximum(all_combined_masks[loop_index], (all_masks_to_confirm[loop_index][loop_confirmations].cpu().numpy() > 0.5).astype(np.uint8))
             else:
                 all_combined_masks[loop_index] = np.maximum(all_combined_masks[loop_index], (all_masks_to_confirm[loop_index][loop_confirmations].cpu().numpy() > 0.5).astype(np.uint8))
+        # Insert the option in which the user decides to skip all the masks
+        elif user_choice == 'skip':
+            loop_confirmations = len(all_masks_to_confirm[loop_index]) - 1
         
         if loop_confirmations >= len(all_masks_to_confirm[loop_index]) - 1:
             # Update the output path to use .png extension

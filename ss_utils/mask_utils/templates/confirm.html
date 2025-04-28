@@ -143,6 +143,8 @@
                 document.getElementById('confirm-btn').click();
             } else if (event.key === 'n') {
                 document.getElementById('deny-btn').click();
+            } else if (event.key === 's') {
+                document.getElementById('skip-btn').click();
             }
         });
     </script>
@@ -166,9 +168,10 @@
         <div class="button-container">
             <button type="submit" name="choice" value="confirm" id="confirm-btn">Confirm</button>
             <button type="submit" name="choice" value="deny" id="deny-btn">Deny</button>
+            <button type="submit" name="choice" value="skip" id="skip-btn">Skip</button>
         </div>
         <div class="keyboard-hint">
-            Keyboard shortcuts: Press <span class="key">Y</span> to confirm or <span class="key">N</span> to deny
+            Keyboard shortcuts: Press <span class="key">Y</span> to confirm or <span class="key">N</span> to deny or <span class="key">S</span> to skip.
         </div>
     </form>
 </body>
