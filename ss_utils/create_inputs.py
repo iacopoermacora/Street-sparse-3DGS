@@ -49,17 +49,44 @@ def parse_json(json_file):
     
     return image_info
 
-def sort_images_by_time(image_info):
-    """Sort images by timestamp
+def parse_iso_timestamp(timestamp_str):
+    """
+    Parse ISO format timestamp strings that may have variable precision in fractional seconds.
+    
     Args:
-        image_info (dict): Dictionary containing image IDs and their metadata.
+        timestamp_str (str): ISO format timestamp string, e.g. "2023-10-23T10:30:32.24Z"
+        
+    Returns:
+        datetime: Parsed datetime object
+    """
+    # Remove the 'Z' timezone indicator
+    if timestamp_str.endswith('Z'):
+        timestamp_str = timestamp_str[:-1]
+    
+    # Handle the case where we might have less than 6 digits for microseconds
+    if '.' in timestamp_str:
+        main_part, frac_part = timestamp_str.split('.')
+        # Ensure the fractional part has exactly 6 digits (microseconds)
+        frac_part = frac_part.ljust(6, '0')
+        timestamp_str = f"{main_part}.{frac_part}"
+    
+    # Add UTC timezone info
+    timestamp_str += "+00:00"
+    
+    return datetime.fromisoformat(timestamp_str)
+
+def sort_images_by_time(image_info):
+    """
+    Sort images by their timestamp.
+    
+    Args:
+        image_info (dict): A dictionary mapping ImageId to its properties (timestamp, x, y).
     
     Returns:
-        list: A sorted list of tuples containing image IDs and their metadata.
+        list: A sorted list of tuples (ImageId, properties) based on timestamp.
     """
     print("Sorting images...")
-
-    sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
+    sorted_images = sorted(image_info.items(), key=lambda x: parse_iso_timestamp(x[1]['timestamp']))
     return sorted_images
 
 # Step 4: Copy and rename images

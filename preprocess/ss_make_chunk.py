@@ -153,6 +153,86 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
         
         # If we reach here, the squares overlap
         return True
+    
+    def filter_points_by_mesh_distance(pcd, mesh_path, max_distance=0.1):
+        """
+        Filter points in the point cloud that are within max_distance from the mesh.
+        
+        Args:
+            pcd: The point cloud (o3d.geometry.PointCloud)
+            mesh_path: Path to the reference mesh PLY file
+            max_distance: Maximum distance threshold in meters (0.1 = 10 cm)
+            
+        Returns:
+            filtered_pcd: Point cloud containing only points within the threshold
+        """
+        print(f"Filtering points by distance to mesh (max distance: {max_distance*100:.1f} cm)...")
+        
+        # Load the mesh
+        try:
+            mesh = o3d.io.read_triangle_mesh(mesh_path)
+            if not mesh.has_triangles():
+                print("Warning: The loaded mesh has no triangles. Skipping distance filtering.")
+                return pcd
+            
+            # Ensure the mesh has vertex normals for distance computation
+            if not mesh.has_vertex_normals():
+                print("Computing mesh vertex normals...")
+                mesh.compute_vertex_normals()
+        except Exception as e:
+            print(f"Error loading mesh from {mesh_path}: {e}")
+            print("Skipping mesh-based filtering.")
+            return pcd
+        
+        # Convert point cloud to numpy array for processing
+        points = np.asarray(pcd.points)
+        colors = np.asarray(pcd.colors) if pcd.has_colors() else None
+        normals = np.asarray(pcd.normals) if pcd.has_normals() else None
+        
+        print(f"Creating raycasting scene for {len(points)} points...")
+        
+        # Create a scene with the mesh for distance queries
+        scene = o3d.t.geometry.RaycastingScene()
+        mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+        scene.add_triangles(mesh_t)
+        
+        # Process in batches to avoid memory issues
+        batch_size = 100000
+        n_points = len(points)
+        n_batches = int(np.ceil(n_points / batch_size))
+        
+        # Lists to store filtered data
+        filtered_indices = []
+        
+        print(f"Computing distances in {n_batches} batches...")
+        
+        # Process each batch
+        for i in tqdm(range(n_batches)):
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, n_points)
+            
+            # Get current batch
+            batch_points = points[start_idx:end_idx]
+            
+            # Compute distances for the current batch
+            query_points = o3d.core.Tensor(batch_points, dtype=o3d.core.Dtype.Float32)
+            batch_distances = scene.compute_distance(query_points).numpy()
+            
+            # Filter based on distance threshold
+            batch_mask = batch_distances <= max_distance
+            
+            # Store indices of points to keep
+            batch_indices = np.where(batch_mask)[0] + start_idx
+            filtered_indices.extend(batch_indices)
+        
+        # Create a new point cloud with the filtered points
+        filtered_pcd = pcd.select_by_index(filtered_indices)
+        
+        print(f"Original point count: {len(pcd.points)}")
+        print(f"Filtered point count: {len(filtered_pcd.points)}")
+        print(f"Removed {len(pcd.points) - len(filtered_pcd.points)} points ({(1 - len(filtered_pcd.points)/len(pcd.points))*100:.2f}%)")
+        
+        return filtered_pcd
 
     # Find all LAZ files in the input directory
     laz_files = [os.path.join(input_files_path, f) for f in os.listdir(input_files_path) 
@@ -189,6 +269,11 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
             continue
         combined_pcd += pcd
     
+    mesh_path = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total_vis2mesh.ply")
+    # Filter points based on distance to mesh
+    print("Filtering points based on distance to mesh...")
+    combined_pcd = filter_points_by_mesh_distance(combined_pcd, mesh_path, max_distance=0.1)
+
     if args.LiDAR_initialisation:
         downsampled_pcd = downsample_for_max_density(combined_pcd, max_density=args.LiDAR_downsample_density)
 
@@ -358,6 +443,24 @@ def make_chunk(i, j, n_width, n_height):
                 n_pts = np.isin(image_meta.point3D_ids, colmap_indices).sum()
                 blending_dict[image_meta.name][f"{i}_{j}"] = str(n_pts)
         
+        images_depths_out = {}
+        # Filter the images_depths to include only the ones in the chunk
+        for key in images_depth_metas:
+            # Get the camera center
+            cam_center = -qvec2rotmat(images_depth_metas[key].qvec).T @ images_depth_metas[key].tvec
+            # Check if the camera center is in the chunk
+            if np.all(cam_center < corner_max) and np.all(cam_center > corner_min):
+                # Add the image to the output
+                images_depths_out[key] = Image(
+                    id=key,
+                    qvec=images_depth_metas[key].qvec,
+                    tvec=images_depth_metas[key].tvec,
+                    camera_id=images_depth_metas[key].camera_id,
+                    name=images_depth_metas[key].name,
+                    xys=images_depth_metas[key].xys,
+                    point3D_ids=images_depth_metas[key].point3D_ids
+                )
+        
         center = (corner_min + corner_max) / 2
         extent = corner_max - corner_min
         
@@ -365,8 +468,6 @@ def make_chunk(i, j, n_width, n_height):
             f.write(' '.join(map(str, center)))
         with open(os.path.join(out_path, "extent.txt"), 'w') as f:
             f.write(' '.join(map(str, extent)))
-
-        # PACOMMENT: TODO: Insert here an option to have or not the LiDAR initialisation
 
         print(f"Filtering the points for chunk {i}_{j}")
         # Filter LiDAR points for the chunk
@@ -392,7 +493,7 @@ def make_chunk(i, j, n_width, n_height):
                 )
         
         # Then add LiDAR points with new IDs that don't conflict
-        if lidar_xyzs is not None and len(lidar_xyzs) > 0:
+        if lidar_xyzs is not None and len(lidar_xyzs) > 0 and args.LiDAR_initialisation:
             # Find the maximum ID in the original points
             max_id = max(points3d.keys()) if points3d else 0
             
@@ -408,9 +509,11 @@ def make_chunk(i, j, n_width, n_height):
                     point2D_idxs=np.array([]),  # No image associations
                 )
         
-        print(f"Writing chunk {i}_{j} with {len(images_out)} images and {len(points_out)} points")
+        print(f"Writing chunk {i}_{j} with {len(images_out)} images and {len(points_out)} points and {len(images_depths_out)} additional depth maps")
 
         write_model(cam_intrinsics, images_out, points_out, out_colmap, f".{args.model_type}")
+        write_images_binary(images_depths_out, os.path.join(out_colmap, "images_depths.bin"))
+
     else:
         excluded_chunks.append([i, j])
         print("Chunk excluded")
@@ -432,7 +535,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_type', default="bin")
 
     parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
-    parser.add_argument('--LiDAR_downsample_density', type=int, default=500, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
+    parser.add_argument('--LiDAR_downsample_density', type=int, default=100, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
 
     args = parser.parse_args()
 
@@ -444,6 +547,8 @@ if __name__ == '__main__':
             blending_dict = {name[:-1] if name[-1] == '\n' else name: {} for name in test_cam_names_list}
 
     cam_intrinsics, images_metas, points3d = read_model(args.base_dir, ext=f".{args.model_type}")
+
+    images_depth_metas = read_images_binary(os.path.join(args.base_dir, "images_depths.bin"))
 
     cam_centers = np.array([
         -qvec2rotmat(images_metas[key].qvec).astype(np.float32).T @ images_metas[key].tvec.astype(np.float32)

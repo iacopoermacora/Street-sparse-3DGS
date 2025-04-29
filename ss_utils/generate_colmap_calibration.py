@@ -54,6 +54,32 @@ def parse_json(json_file):
     
     return image_info, metadata
 
+def parse_iso_timestamp(timestamp_str):
+    """
+    Parse ISO format timestamp strings that may have variable precision in fractional seconds.
+    
+    Args:
+        timestamp_str (str): ISO format timestamp string, e.g. "2023-10-23T10:30:32.24Z"
+        
+    Returns:
+        datetime: Parsed datetime object
+    """
+    # Remove the 'Z' timezone indicator
+    if timestamp_str.endswith('Z'):
+        timestamp_str = timestamp_str[:-1]
+    
+    # Handle the case where we might have less than 6 digits for microseconds
+    if '.' in timestamp_str:
+        main_part, frac_part = timestamp_str.split('.')
+        # Ensure the fractional part has exactly 6 digits (microseconds)
+        frac_part = frac_part.ljust(6, '0')
+        timestamp_str = f"{main_part}.{frac_part}"
+    
+    # Add UTC timezone info
+    timestamp_str += "+00:00"
+    
+    return datetime.fromisoformat(timestamp_str)
+
 def sort_images_by_time(image_info):
     """
     Sort images by their timestamp.
@@ -65,13 +91,13 @@ def sort_images_by_time(image_info):
         list: A sorted list of tuples (ImageId, properties) based on timestamp.
     """
     print("Sorting images...")
-    sorted_images = sorted(image_info.items(), key=lambda x: datetime.fromisoformat(x[1]['timestamp'].replace("Z", "+00:00")))
+    sorted_images = sorted(image_info.items(), key=lambda x: parse_iso_timestamp(x[1]['timestamp']))
     return sorted_images
 
 def select_eval_images(sorted_images, metadata):
     """
     Select images for evaluation based on time and distance constraints:
-    - Select one image every 5 in order of time
+    - Select one image every 4 in order of time
     - If one of the 4 images after the selected one is distant more than 2m from the previous one,
       reset the count and select that one
     - For COLMAP conversion, also include the second image after the selected one (third of every 5)
@@ -128,9 +154,9 @@ def select_eval_images(sorted_images, metadata):
         
         # If we're not resetting the count due to distance, 
         # add the third image (i+2) to test_images if it exists
-        # but only add the images 25% of the time (to have a train-test balance to be about 80-20)
+        # but only add the images 35% of the time
         if not reset_count and i + 2 < len(sorted_images):
-            if np.random.rand() < 0.25:
+            if np.random.rand() < 0.35:
                 # Add the third image to test_images
                 test_img_id = sorted_images[i + 2][0]
                 test_images.append(test_img_id)
@@ -166,7 +192,7 @@ def create_image_id_to_index_mapping(colmap_image_ids, metadata):
                 break
     
     # Sort by timestamp
-    sorted_pairs = sorted(id_time_pairs, key=lambda x: datetime.fromisoformat(x[1].replace("Z", "+00:00")))
+    sorted_pairs = sorted(id_time_pairs, key=lambda x: parse_iso_timestamp(x[1]))
     
     # Create the mapping
     image_id_to_index = {}
@@ -198,7 +224,7 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
     test_images_info = [(img_id, metadata_records[img_id]) for img_id in test_images]
     sorted_test_images = sorted(
         test_images_info, 
-        key=lambda x: datetime.fromisoformat(x[1]['RecordingTimeGps'].replace("Z", "+00:00"))
+        key=lambda x: parse_iso_timestamp(x[1]['RecordingTimeGps'])
     )
     
     # Create test.txt file

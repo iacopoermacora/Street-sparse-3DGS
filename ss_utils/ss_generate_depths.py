@@ -30,14 +30,36 @@ if __name__ == "__main__":
         print("Exiting the script.")
         sys.exit(0)
 
-    chunk_dir = os.path.join(args.project_dir, "camera_calibration/chunks")
-    
-    total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
-
     # Call the script to augment the recording details
 
     print("#"*30)
-    print("Step 1/7: Augmenting the recording details")
+    print("Step 1/8: Preparing the input point cloud")
+    print("#"*30)
+
+    # Get the time before the script starts
+    start_time = time.time()
+
+    total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
+
+    # If the total.ply file already exists, skip this step
+    if not os.path.exists(total_ply):
+        os.makedirs(os.path.dirname(total_ply), exist_ok=True)
+        os.chmod(os.path.dirname(total_ply), 0o777)
+        prepare_lidar_for_vis2mesh = [
+                    "python", f"ss_utils/depth_scripts/prepare_lidar_for_vis2mesh.py",
+                    "--input_folder", os.path.join(args.project_dir, "ss_raw_images", "LiDAR"),
+                    "--output_path", total_ply,
+                    "--translation_file", os.path.join(args.project_dir, "camera_calibration", "translation.json")
+                ]
+        try:
+            subprocess.run(prepare_lidar_for_vis2mesh, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing prepare_lidar_for_vis2mesh: {e}")
+            sys.exit(1)
+        print(f"Time taken to prepare the input point cloud: {time.time() - start_time} seconds")
+
+    print("#"*30)
+    print("Step 2/8: Augmenting the recording details")
     print("#"*30)
 
     # Get the time before the script starts
@@ -61,7 +83,7 @@ if __name__ == "__main__":
     # Call the colmap_to_vis2mesh.py script to convert the COLMAP model to a custom JSON format
 
     print("#"*30)
-    print("Step 2/7: Converting the COLMAP model to a custom JSON format for vis2mesh")
+    print("Step 3/8: Converting the COLMAP model to a custom JSON format for vis2mesh")
     print("#"*30)
 
     # Get the time before the script starts
@@ -87,7 +109,7 @@ if __name__ == "__main__":
     # Call the docker container vis2mesh to generate the mesh
 
     print("#"*30)
-    print("Step 3/7: Generating the mesh using vis2mesh")
+    print("Step 4/8: Generating the mesh using vis2mesh")
     print("#"*30)
 
     # Get the time before the script starts
@@ -150,7 +172,7 @@ if __name__ == "__main__":
     # Call the script to convert the mesh to the .ctm format
 
     print("#"*30)
-    print("Step 4/7: Converting the mesh to the .ctm format")
+    print("Step 5/8: Converting the mesh to the .ctm format")
     print("#"*30)
 
     # Get the time before the script starts
@@ -176,7 +198,7 @@ if __name__ == "__main__":
 
     # Call the script to convert the recording_details file to the .stations format
     print("#"*30)
-    print("Step 5/7: Converting the recording_details file to the .stations format")
+    print("Step 6/8: Converting the recording_details file to the .stations format")
     print("#"*30)
 
     # Get the time before the script starts
@@ -216,7 +238,7 @@ if __name__ == "__main__":
     # Call the script to render the depth maps
 
     print("#"*30)
-    print("Step 6/7: Rendering the depth maps")
+    print("Step 7/8: Rendering the depth maps")
     print("#"*30)
 
     # Get the time before the script starts
@@ -255,7 +277,7 @@ if __name__ == "__main__":
     # Call the script to convert the depth maps to the bw format and sort them accordingly
 
     print("#"*30)
-    print("Step 7/7: Converting the depth maps to the bw format and sorting them")
+    print("Step 8/8: Converting the depth maps to the bw format and sorting them")
     print("#"*30)
 
     # Get the time before the script starts

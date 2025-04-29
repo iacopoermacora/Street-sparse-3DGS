@@ -519,11 +519,11 @@ if __name__ == "__main__":
     aligned_model_dir = os.path.join(args.project_dir, "camera_calibration", "aligned")
     write_depth_params_for_model(aligned_model_dir, all_calculated_params, args.default_scale, args.default_offset)
 
-    chunks = find_chunks(args.project_dir)
-    print(f"\nProcessing {len(chunks)} Chunks...")
-    total_chunk_entries = 0
-    for chunk_dir in chunks:
-        print(f" Processing Chunk: {os.path.basename(chunk_dir)}")
-        entries = write_depth_params_for_model(chunk_dir, all_calculated_params, args.default_scale, args.default_offset)
-        total_chunk_entries += entries
-    print(f"Finished processing chunks. Total entries written: {total_chunk_entries}")
+    # chunks = find_chunks(args.project_dir)
+    # print(f"\nProcessing {len(chunks)} Chunks...")
+    # total_chunk_entries = 0
+    # for chunk_dir in chunks:
+    #     print(f" Processing Chunk: {os.path.basename(chunk_dir)}")
+    #     entries = write_depth_params_for_model(chunk_dir, all_calculated_params, args.default_scale, args.default_offset)
+    #     total_chunk_entries += entries
+    # print(f"Finished processing chunks. Total entries written: {total_chunk_entries}")
