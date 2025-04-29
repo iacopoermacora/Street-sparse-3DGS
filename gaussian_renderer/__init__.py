@@ -147,7 +147,8 @@ def render_post(
         interpolation_weights = torch.Tensor([]).float(),
         num_node_kids = torch.Tensor([]).int(),
         interp_python = True,
-        use_trained_exp = False):
+        use_trained_exp = False,
+        do_depth = False):  # PACOMMENT: Add this parameter
     """
     Render the scene from a hierarchy.  
     
@@ -261,12 +262,12 @@ def render_post(
         parent_indices=parent_indices,
         interpolation_weights=interpolation_weights,
         num_node_kids=num_node_kids,
-        do_depth=False
+        do_depth=do_depth # PACOMMENT: Added this parameter
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    rendered_image, radii, _ = rasterizer(
+    rendered_image, radii, depth_image = rasterizer(
         means3D = means3D,
         means2D = means2D,
         shs = shs,
@@ -286,12 +287,21 @@ def render_post(
     
     vis_filter = radii > 0
 
-    # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
-    # They will be excluded from value updates used in the splitting criteria.
-    return {"render": rendered_image,
-            "viewspace_points": screenspace_points,
-            "visibility_filter" : vis_filter,
-            "radii": radii[vis_filter]}
+    if do_depth:
+        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+        # They will be excluded from value updates used in the splitting criteria.
+        return {"render": rendered_image,
+                "viewspace_points": screenspace_points,
+                "visibility_filter" : vis_filter,
+                "radii": radii[vis_filter],
+                "depth" : depth_image}
+    else:
+        # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
+        # They will be excluded from value updates used in the splitting criteria.
+        return {"render": rendered_image,
+                "viewspace_points": screenspace_points,
+                "visibility_filter" : vis_filter,
+                "radii": radii[vis_filter]}
 
 def render_coarse(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, zfar=0.0, override_color = None, indices = None):
     """

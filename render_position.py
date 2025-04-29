@@ -1,3 +1,5 @@
+# render_position.py
+
 import os
 import math
 import torch
@@ -16,8 +18,8 @@ import sys
 
 @torch.no_grad()
 def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
-    cameras = scene.getTestCameras()
-    print(f"Found {len(cameras)} test cameras")
+    cameras = scene.getTrainCameras()
+    print(f"Found {len(cameras)} train cameras")
 
     # --- Find first group of cameras with same position (T) ---
     grouped = {}
@@ -30,11 +32,14 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
     
     average_z = np.mean(z_positions)
 
-    # Order the groups by the key value
-    grouped = {k: v for k, v in sorted(grouped.items(), key=lambda item: item[0])}
+    if new_x is not None and new_y is not None:
+        # Order the groups by the key value
+        grouped = {k: v for k, v in sorted(grouped.items(), key=lambda item: item[0])}
 
-    # Take the first group with 6 cameras
-    grouped = {k: v for k, v in grouped.items() if len(v) == 10}
+    # Take the first group with 10 cameras
+    grouped = {k: v for k, v in grouped.items() if len(v) >= 1}
+
+    print(f"Grouped sample: {grouped}")
     print(f"Found {len(grouped)} groups of cameras with 10 views")
     chosen_key = next(iter(grouped))  # take the first group
     group = grouped[chosen_key]
@@ -44,9 +49,14 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
     os.makedirs(out_dir, exist_ok=True)
 
     for cam in tqdm(group):
-        new_x_trans = new_x + (- cam.camera_center[0].item())
-        new_y_trans = new_y + (- cam.camera_center[1].item())
-        new_z_trans = average_z + (- cam.camera_center[2].item())
+        if new_x is None or new_y is None:
+            new_x_trans = 0.0
+            new_y_trans = 0.0
+            new_z_trans = 0.0
+        else:
+            new_x_trans = new_x + (- cam.camera_center[0].item())
+            new_y_trans = new_y + (- cam.camera_center[1].item())
+            new_z_trans = average_z + (- cam.camera_center[2].item())
         # Modify the camera position only on x and y
         cam.trans = np.array([new_x_trans, new_y_trans, new_z_trans])
         cam.world_view_transform = torch.tensor(
@@ -101,7 +111,7 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
             num_siblings
         )
 
-        image = torch.clamp(render_post(
+        render_result = render_post(
             cam, 
             scene.gaussians, 
             pipe,
@@ -110,21 +120,38 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
             parent_indices=parent_indices,
             interpolation_weights=interpolation_weights,
             num_node_kids=num_siblings,
-            use_trained_exp=False
-        )["render"], 0.0, 1.0)
+            use_trained_exp=False,
+            do_depth=True  # Enable depth rendering
+        )
 
-        out_path = os.path.join(out_dir, str(new_x) + "_" + str(new_y) + "_" + cam.image_name.split(".")[0].split("_")[-1] + ".png")
-        torchvision.utils.save_image(image, out_path)
+        # Get the rendered image and depth
+        image = torch.clamp(render_result["render"], 0.0, 1.0)
+        depth = render_result["depth"]  # Get the depth map
+
+        # Save the rendered image
+        base_name = str(new_x) + "_" + str(new_y) + "_" + cam.image_name.split(".")[0].split("_")[-1]
+        rgb_path = os.path.join(out_dir, base_name + ".png")
+        torchvision.utils.save_image(image, rgb_path)
+        
+        # Save the depth map
+        # Scale depth for better visualization (optional)
+        # You can adjust this based on your scene's depth range
+        os.makedirs(os.path.join(out_dir, "depth"), exist_ok=True)
+        depth_vis = depth / depth.max()  # Normalize to [0,1]
+        depth_path = os.path.join(out_dir, "depth", base_name + "_depth.png")
+        torchvision.utils.save_image(depth_vis.repeat(3, 1, 1), depth_path)  # Save as grayscale image
 
 if __name__ == "__main__":
     parser = ArgumentParser()
     mp = ModelParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument("--out_dir", type=str, required=True)
-    parser.add_argument("--new_x", type=float, required=True)
-    parser.add_argument("--new_y", type=float, required=True)
+    parser.add_argument("--new_x", type=float)
+    parser.add_argument("--new_y", type=float)
     args = parser.parse_args(sys.argv[1:])
 
+    if args.new_x is None or args.new_y is None:
+        print("Value x and y not provided, displaying a random training image")
     dataset, pipe = mp.extract(args), pp.extract(args)
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.active_sh_degree = dataset.sh_degree
