@@ -620,16 +620,16 @@ if __name__ == '__main__':
             if chunk_pcd is not None:
                 total_pcd += chunk_pcd
     
-    total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
+    # total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
 
-    if not os.path.exists(os.path.dirname(total_ply)):
-        os.makedirs(os.path.dirname(total_ply))
-        os.chmod(os.path.dirname(total_ply), 0o777)
+    # if not os.path.exists(os.path.dirname(total_ply)):
+    #     os.makedirs(os.path.dirname(total_ply))
+    #     os.chmod(os.path.dirname(total_ply), 0o777)
         
-    o3d.io.write_point_cloud(total_ply, total_pcd)
+    # o3d.io.write_point_cloud(total_ply, total_pcd)
 
-    # Convert the total ply file from double to float using trimesh
-    convert_ply_to_float(total_ply)
+    # # Convert the total ply file from double to float using trimesh
+    # convert_ply_to_float(total_ply)
 
     if os.path.exists(test_file):
         with open(f"{args.base_dir}/blending_dict.json", "w") as f:

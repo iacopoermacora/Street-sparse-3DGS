@@ -690,8 +690,6 @@ class GaussianModel:
         if self.scaffold_points is not None:
             prune_mask[:self.scaffold_points] = False
         
-        # INSERT HERE MODIFIED COMPARE_POINTS_TO_GT TO PRUNE POINTS FURTHER THAN 1CM FROM GT
-        print(F"value of ground truth point cloud constraints: {gt_point_cloud_constraints}")
         if gt_point_cloud_constraints:
             prune_mask = self.compare_points_to_gt(prune_mask)
 
