@@ -60,6 +60,7 @@ class GaussianModel:
         self._opacity = torch.empty(0)
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
+        self.xyz_gradient_accum_depth = torch.empty(0) # PACOMMENT: Added this to store the depth gradient accumulation
         self.denom = torch.empty(0)
         self.optimizer = None
         self.percent_dense = 0
@@ -93,6 +94,7 @@ class GaussianModel:
             self._opacity,
             self.max_radii2D,
             self.xyz_gradient_accum,
+            self.xyz_gradient_accum_depth, # PACOMMENT: Added this to store the depth gradient accumulation
             self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
@@ -108,11 +110,13 @@ class GaussianModel:
         self._opacity,
         self.max_radii2D, 
         xyz_gradient_accum, 
+        xyz_gradient_accum_depth, # PACOMMENT: Added this to store the depth gradient accumulation
         denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
+        self.xyz_gradient_accum_depth = xyz_gradient_accum_depth # PACOMMENT: Added this to store the depth gradient accumulation
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
@@ -274,6 +278,7 @@ class GaussianModel:
     def training_setup(self, training_args, our_adam=True):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.xyz_gradient_accum_depth = torch.zeros((self.get_xyz.shape[0], 1), device="cuda") # PACOMMENT: Added this to store the depth gradient accumulation
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
@@ -567,6 +572,20 @@ class GaussianModel:
             else:
                 group["params"][0] = nn.Parameter(group["params"][0][mask].requires_grad_(True))
                 optimizable_tensors[group["name"]] = group["params"][0]
+            
+            # -------- ADD THIS FOR MASK UPDATE --------
+            if hasattr(self, '_is_new_in_current_step_mask') and self._is_new_in_current_step_mask is not None:
+                 if group["name"] == "xyz": # Or any other key attribute
+                    if self._is_new_in_current_step_mask.shape[0] != mask.shape[0] and self._is_new_in_current_step_mask.shape[0] != torch.sum(mask):
+                        # This check might be tricky due to the mask being for selection, not original size.
+                        # The crucial part is that self._is_new_in_current_step_mask should be indexed by 'mask'
+                        # if 'mask' applies to its current state.
+                        # Let's assume self._is_new_in_current_step_mask is already the size of group["params"][0] *before* pruning here.
+                        pass # If there's a size mismatch prior to this, it's an issue from previous step
+                    
+                    self._is_new_in_current_step_mask = self._is_new_in_current_step_mask[mask]
+            # -------- END ADDITION --------
+
         return optimizable_tensors
 
     def prune_points(self, mask):
@@ -581,6 +600,7 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
+        self.xyz_gradient_accum_depth = self.xyz_gradient_accum_depth[valid_points_mask]
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
@@ -591,6 +611,12 @@ class GaussianModel:
             assert len(group["params"]) == 1
             extension_tensor = tensors_dict[group["name"]]
             stored_state = self.optimizer.state.get(group['params'][0], None)
+
+            # -------- ADD THIS FOR MASK UPDATE --------
+            # Store original param before modification for mask concatenation logic
+            original_param_for_mask_update = group["params"][0]
+            # -------- END ADDITION --------
+
             if stored_state is not None:
 
                 stored_state["exp_avg"] = torch.cat((stored_state["exp_avg"], torch.zeros_like(extension_tensor)), dim=0)
@@ -604,6 +630,18 @@ class GaussianModel:
             else:
                 group["params"][0] = nn.Parameter(torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(True))
                 optimizable_tensors[group["name"]] = group["params"][0]
+            
+            # -------- ADD THIS FOR MASK UPDATE --------
+            if hasattr(self, '_is_new_in_current_step_mask') and self._is_new_in_current_step_mask is not None:
+                if group["name"] == "xyz": # Or any other key attribute that dictates the number of Gaussians
+                    # Ensure the existing mask matches the state *before* concatenation for this group
+                    if self._is_new_in_current_step_mask.shape[0] == original_param_for_mask_update.shape[0]:
+                        new_gaussians_marker = torch.ones(extension_tensor.shape[0], dtype=torch.bool, device=self._xyz.device)
+                        self._is_new_in_current_step_mask = torch.cat((self._is_new_in_current_step_mask, new_gaussians_marker))
+                    # else:
+                        # This case implies a mismatch, which shouldn't happen if initialized correctly.
+                        # print("Warning: _is_new_in_current_step_mask size mismatch during cat_tensors_to_optimizer")
+            # -------- END ADDITION --------
 
         return optimizable_tensors
 
@@ -624,13 +662,14 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.xyz_gradient_accum_depth = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.cat((self.max_radii2D, torch.zeros((new_xyz.shape[0]), device="cuda")))
         #self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
-    def densify_and_split(self, grads, grad_threshold, scene_extent, gt_point_cloud_constraints, N=2):
+    def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
         n_init_points = self.get_xyz.shape[0]
-        # Extract points that satisfy the gradient condition
+        # Extract points that satisfy the gradient condition (not is_depth_only)
         padded_grad = torch.zeros((n_init_points), device="cuda")
         padded_grad[:grads.shape[0]] = grads.squeeze()
         selected_pts_mask = torch.where(padded_grad * self.max_radii2D * torch.pow(self.get_opacity.flatten(), 1/5.0) >= grad_threshold, True, False)
@@ -638,6 +677,7 @@ class GaussianModel:
 
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
+        
         # No densification of the scaffold
         if self.scaffold_points is not None:
             selected_pts_mask[:self.scaffold_points] = False
@@ -654,18 +694,29 @@ class GaussianModel:
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
 
+        # Store the count of new points before adding them
+        num_new_points = N * selected_pts_mask.sum()
+
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation)
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
 
+        # Create a mask for newly added points
+        self.newly_split_points_mask = torch.zeros(self.get_xyz.shape[0], dtype=bool, device="cuda")
+        if num_new_points > 0:
+            self.newly_split_points_mask[-num_new_points:] = True
+
+        print(f"Number of gaussians that were split: {selected_pts_mask.sum()}")
+
     def densify_and_clone(self, grads, grad_threshold, scene_extent):
-        # Extract points that satisfy the gradient condition
+        # Extract points that satisfy the gradient condition (not is_depth_only)
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) * self.max_radii2D * torch.pow(self.get_opacity.flatten(), 1/5.0) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask, self.get_opacity.flatten() > 0.15)
 
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
+
         # No densification of the scaffold
         if self.scaffold_points is not None:
             selected_pts_mask[:self.scaffold_points] = False
@@ -679,29 +730,70 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
+        print(f"Number of gaussians that were cloned: {selected_pts_mask.sum()}")
+
     def densify_and_prune(self, max_grad, min_opacity, extent, gt_point_cloud_constraints):
         grads = self.xyz_gradient_accum 
         grads[grads.isnan()] = 0.0
 
+        # -------- ADD THIS: Initialize the tracking mask --------
+        if self.get_xyz is not None and self.get_xyz.shape[0] > 0 :
+            self._is_new_in_current_step_mask = torch.zeros(self.get_xyz.shape[0], dtype=torch.bool, device=self._xyz.device)
+        else: # Handle case of no points initially
+            self._is_new_in_current_step_mask = torch.empty(0, dtype=torch.bool, device="cuda" if torch.cuda.is_available() else "cpu") # Adjust device as needed
+        # -------- END ADDITION --------
+
+        # Mark that we don't have any newly split points yet
+        self.newly_split_points_mask = torch.zeros(self.get_xyz.shape[0], dtype=bool, device="cuda")
+
+        # grads_depth = self.xyz_gradient_accum_depth
+        # grads_depth[grads_depth.isnan()] = 0.0
+
         self.densify_and_clone(grads, max_grad, extent)
-        self.densify_and_split(grads, max_grad, extent, gt_point_cloud_constraints)
+        self.densify_and_split(grads, max_grad, extent)
         
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if self.scaffold_points is not None:
             prune_mask[:self.scaffold_points] = False
         
         if gt_point_cloud_constraints:
-            prune_mask = self.compare_points_to_gt(prune_mask)
+            prune_mask = self.compare_points_to_gt(prune_mask, self.newly_split_points_mask)
+        
+        # -------- ADD THIS PRINT --------
+        # Ensure mask sizes match before logical_and. This should be true if updates were correct.
+        if self._is_new_in_current_step_mask.shape[0] == prune_mask.shape[0] and self._is_new_in_current_step_mask.shape[0] > 0:
+            newly_created_and_now_pruned_count = (prune_mask & self._is_new_in_current_step_mask).sum().item()
+            if newly_created_and_now_pruned_count > 0: # Optional
+                print(f"Number of newly created Gaussians (clone/split) that will be pruned by main criteria: {newly_created_and_now_pruned_count}")
+        # elif self._is_new_in_current_step_mask.shape[0] != prune_mask.shape[0] and self.get_xyz.shape[0] > 0:
+            # print(f"Warning: Mismatch between _is_new_in_current_step_mask ({self._is_new_in_current_step_mask.shape[0]}) and prune_mask ({prune_mask.shape[0]})")
+        # -------- END ADDITION --------
 
         self.prune_points(prune_mask)
+
+        # -------- ADD THIS: Clean up the temporary mask --------
+        del self._is_new_in_current_step_mask 
+        # -------- END ADDITION --------
 
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] = torch.max(torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True), self.xyz_gradient_accum[update_filter])
+    def add_densification_stats(self, viewspace_point_tensor, update_filter, is_depth_only):
+        norm_value = torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
+        max_value = torch.max(norm_value, self.xyz_gradient_accum[update_filter])
+        
+        # If is_depth_only is True and the max is the norm of viewspace_point_tensor
+        # (i.e., norm_value > self.xyz_gradient_accum[update_filter]), multiply by 1.5
+        if is_depth_only:
+            # Create a mask where norm_value is greater than or equal to the accumulated value
+            mask = norm_value >= self.xyz_gradient_accum[update_filter]
+            # Where the mask is True, multiply max_value by 1.5
+            max_value = torch.where(mask, max_value * 1, max_value)
+        
+        self.xyz_gradient_accum[update_filter] = max_value
         self.denom[update_filter] += 1
+
 
     def load_gt_point_cloud(self, gt_point_cloud_path):
         """
@@ -760,9 +852,10 @@ class GaussianModel:
         
         print(f"FAISS index created with {xyz.shape[0]} points")
 
-    def compare_points_to_gt(self, existing_mask=None):
+    def compare_points_to_gt(self, existing_mask=None, protected_mask=None):
         """
         Generate a mask for points that are further than the threshold distance from the ground truth point cloud.
+        Only compares points that are not already in the existing mask and are inside the ground truth bounds.
         
         Args:
             existing_mask: Optional existing mask to combine with the distance-based mask
@@ -783,47 +876,96 @@ class GaussianModel:
         
         # Get current points
         xyz = self.get_xyz.detach()
+
+        # Create a mask for points we need to check
+        # (points not in existing mask AND not in protected mask AND within GT bounds)
+        points_to_check_mask = torch.ones(xyz.shape[0], dtype=bool, device=xyz.device)
+
+        # densified_to_check = torch.zeros(xyz.shape[0], dtype=bool, device=xyz.device)
+
+        # densified_to_check = torch.logical_or(densified_to_check, protected_mask)
+        
+        # Don't check points that are already marked for pruning
+        if existing_mask is not None:
+            points_to_check_mask = torch.logical_and(points_to_check_mask, ~existing_mask)
+        
+        # Don't check protected points (like newly split points)
+        if protected_mask is not None:
+            points_to_check_mask = torch.logical_and(points_to_check_mask, ~protected_mask)
+            print(f"Protected {protected_mask.sum().item()} newly split points from pruning")
+        
+        # Also limit to points within GT bounds
+        within_gt_bounds_mask = (
+            (xyz[:, 0] >= self.gt_x_min) & (xyz[:, 0] <= self.gt_x_max) &
+            (xyz[:, 1] >= self.gt_y_min) & (xyz[:, 1] <= self.gt_y_max)
+        )
+        
+        # Combine the masks to get only points we need to check
+        points_to_check_mask = torch.logical_and(points_to_check_mask, within_gt_bounds_mask)
+        
+        # densified_to_check = torch.logical_and(densified_to_check, within_gt_bounds_mask)
+        
+        # Get indices of points we need to check
+        indices_to_check = torch.nonzero(points_to_check_mask).squeeze(1)
+
+        # indices_densified_to_check = torch.nonzero(densified_to_check).squeeze(1)
+        
+        # If no points need checking, return the existing mask
+        if len(indices_to_check) == 0:
+            print("No points need distance checking")
+            return existing_mask if existing_mask is not None else torch.zeros(xyz.shape[0], dtype=bool, device=xyz.device)
+        
+        # Extract only the points we need to check
+        xyz_to_check = xyz[indices_to_check]
+
+        # xyz_densified_to_check = xyz[indices_densified_to_check]
         
         # Convert tensor to numpy for FAISS
-        xyz_np = xyz.cpu().numpy().astype(np.float32)
-        
-        print(f"Searching for nearest neighbors in the ground truth point cloud...")
-        
-        # Search for nearest neighbors
-        distances, _ = self.gt_point_cloud.search(xyz_np, k=1)
-        
-        print(f"Found nearest neighbors in the ground truth point cloud")
-        
-        # Create mask for points that are TOO FAR from ground truth (to be pruned)
-        # FAISS returns squared L2 distances
+        xyz_np_to_check = xyz_to_check.cpu().numpy().astype(np.float32)
 
-        distance_prune_mask = np.sqrt(distances[:, 0]) > distance_threshold
+        # xyz_densified_np_to_check = xyz_densified_to_check.cpu().numpy().astype(np.float32)
+        
+        # Search for nearest neighbors (only for points we're checking)
+        distances, _ = self.gt_point_cloud.search(xyz_np_to_check, k=1)
+
+        # distances_densified, _ = self.gt_point_cloud.search(xyz_densified_np_to_check, k=1)
+        
+        distance_prune_mask_checked = distances[:, 0] > distance_threshold**2
+        # Create mask for checked points that are TOO FAR from ground truth (to be pruned)
+        # distance_prune_mask_checked = distances[:, 0] > distance_threshold**2
+
+        # distance_prune_mask_densified = distances_densified[:, 0] > distance_threshold**2
+
+        # # Print the number of points that are too far for the densified points
+        # print(f"Number of points that are too far for the densified points: {distance_prune_mask_densified.sum()} out of {len(xyz_densified_to_check)} (or {len(distance_prune_mask_densified)}")
         
         # Convert mask to torch tensor
-        distance_prune_mask = torch.from_numpy(distance_prune_mask).to(xyz.device)
-
-        # Make a mask of the points that are within the gt bounds
-        within_gt_bounds_mask = (
-                 (self.get_xyz[:, 0] >= self.gt_x_min) & (self.get_xyz[:, 0] <= self.gt_x_max) &
-                 (self.get_xyz[:, 1] >= self.gt_y_min) & (self.get_xyz[:, 1] <= self.gt_y_max)
-             )
-
-        # Count how many points are within the bounds
-        print(f"Number of points within GT bounds: {torch.sum(within_gt_bounds_mask).item()} out of {len(xyz)}")
-
-        # Combine the distance mask with the bounds mask to not prune outside points
-        distance_prune_mask = torch.logical_and(distance_prune_mask, within_gt_bounds_mask)
+        distance_prune_mask_checked = torch.from_numpy(distance_prune_mask_checked).to(xyz.device)
+        
+        # Initialize full mask with all False
+        distance_prune_mask_full = torch.zeros(xyz.shape[0], dtype=bool, device=xyz.device)
+        
+        # Set the pruning status only for the checked points
+        distance_prune_mask_full[indices_to_check] = distance_prune_mask_checked
         
         # If there's an existing mask, combine it with our distance-based mask (logical OR)
         if existing_mask is not None:
-            combined_prune_mask = torch.logical_or(existing_mask, distance_prune_mask)
+            combined_prune_mask = torch.logical_or(existing_mask, distance_prune_mask_full)
         else:
-            combined_prune_mask = distance_prune_mask
+            combined_prune_mask = distance_prune_mask_full
+
+        # Check how much existing_mask and protected_mask overlap to see if newly densified points are being pruned
+        if existing_mask is not None:
+            overlap_mask = torch.logical_and(existing_mask, protected_mask)
+            overlap_count = overlap_mask.sum().item()
+            print(f"Overlap between existing mask and protected mask: {overlap_count} points")
         
         # Count how many additional points will be pruned due to distance constraint
-        additional_pruned = torch.sum(distance_prune_mask & ~(existing_mask if existing_mask is not None else torch.zeros_like(distance_prune_mask))).item()
+        additional_pruned = torch.sum(distance_prune_mask_full).item()
         total_pruned = torch.sum(combined_prune_mask).item()
+        total_points_checked = len(indices_to_check)
         
+        print(f"Checked distances for {total_points_checked} out of {len(xyz)} points")
         print(f"Distance constraint will prune additional {additional_pruned} points")
         print(f"Total points to be pruned: {total_pruned} out of {len(xyz)}")
         print(f"Distance checking took {time.time() - start_time:.2f} seconds")

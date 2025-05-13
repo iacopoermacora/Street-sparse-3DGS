@@ -304,12 +304,12 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
 
     return points, colors, combined_pcd
 
-def process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb):
-    """
-    Filters the LiDAR points that belong to the given chunk.
-    """
-    mask = np.all(lidar_xyz < corner_max, axis=-1) & np.all(lidar_xyz > corner_min, axis=-1)
-    return lidar_xyz[mask], lidar_rgb[mask]
+# def process_lidar_for_chunk(i, j, corner_min, corner_max, lidar_xyz, lidar_rgb):
+#     """
+#     Filters the LiDAR points that belong to the given chunk.
+#     """
+#     mask = np.all(lidar_xyz < corner_max, axis=-1) & np.all(lidar_xyz > corner_min, axis=-1)
+#     return lidar_xyz[mask], lidar_rgb[mask]
 
 
 def get_nb_pts(image_metas):

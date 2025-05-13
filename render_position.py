@@ -17,9 +17,9 @@ from argparse import ArgumentParser
 import sys
 
 @torch.no_grad()
-def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
-    cameras = scene.getTrainCameras()
-    print(f"Found {len(cameras)} train cameras")
+def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y, new_z):
+    cameras = scene.getTestCameras()
+    print(f"Found {len(cameras)} test cameras")
 
     # --- Find first group of cameras with same position (T) ---
     grouped = {}
@@ -39,7 +39,7 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
     # Take the first group with 10 cameras
     grouped = {k: v for k, v in grouped.items() if len(v) >= 1}
 
-    print(f"Grouped sample: {grouped}")
+    print(f"Grouped sample: {grouped.keys()}")
     print(f"Found {len(grouped)} groups of cameras with 10 views")
     chosen_key = next(iter(grouped))  # take the first group
     group = grouped[chosen_key]
@@ -48,7 +48,13 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
     # --- Create output dir ---
     os.makedirs(out_dir, exist_ok=True)
 
+    first_cam = True
+
     for cam in tqdm(group):
+        if first_cam:
+            print(f"Image name: {cam.image_name}")
+            first_cam = False
+        
         if new_x is None or new_y is None:
             new_x_trans = 0.0
             new_y_trans = 0.0
@@ -56,7 +62,10 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y):
         else:
             new_x_trans = new_x + (- cam.camera_center[0].item())
             new_y_trans = new_y + (- cam.camera_center[1].item())
-            new_z_trans = average_z + (- cam.camera_center[2].item())
+            if new_z is None:
+                new_z_trans = average_z + (- cam.camera_center[2].item())
+            else:
+                new_z_trans = new_z + (- cam.camera_center[2].item())
         # Modify the camera position only on x and y
         cam.trans = np.array([new_x_trans, new_y_trans, new_z_trans])
         cam.world_view_transform = torch.tensor(
@@ -148,13 +157,14 @@ if __name__ == "__main__":
     parser.add_argument("--out_dir", type=str, required=True)
     parser.add_argument("--new_x", type=float)
     parser.add_argument("--new_y", type=float)
+    parser.add_argument("--new_z", type=float)
     args = parser.parse_args(sys.argv[1:])
 
     if args.new_x is None or args.new_y is None:
-        print("Value x and y not provided, displaying a random training image")
+        print("Value x and y not provided, displaying a random test image")
     dataset, pipe = mp.extract(args), pp.extract(args)
     gaussians = GaussianModel(dataset.sh_degree)
     gaussians.active_sh_degree = dataset.sh_degree
     scene = Scene(dataset, gaussians, resolution_scales=[1], create_from_hier=True)
 
-    render_one_group_shifted(args, scene, pipe, args.out_dir, args.new_x, args.new_y)
+    render_one_group_shifted(args, scene, pipe, args.out_dir, args.new_x, args.new_y, args.new_z)

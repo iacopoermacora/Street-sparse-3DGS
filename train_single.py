@@ -51,6 +51,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
     depth_l1_weight = get_expon_lr_func(opt.depth_l1_weight_init, opt.depth_l1_weight_final, max_steps=opt.iterations)
 
     ema_loss_for_log = 0.0
+    ema_photo_loss_for_log = 0.0
     ema_Ll1depth_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
@@ -114,9 +115,6 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 if not is_depth_only: # PACOMMENT: Added this condition
                     gt_image = viewpoint_cam.original_image.cuda()
                     if viewpoint_cam.alpha_mask is not None: 
-                        # PACOMMENT: NOTE: I could introduce training just on places where there are gaussians
-                        # but then at the beginning of the training it would not optimise? Because where there 
-                        # is no background there would be no loss... Maybe have to think of another solution
                         alpha_mask = viewpoint_cam.alpha_mask.cuda()
                         image *= alpha_mask
                     
@@ -124,43 +122,57 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     Lssim = (1.0 - ssim(image, gt_image))
                     photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim 
                     loss = photo_loss.clone()
-                else:
-                    gt_image = torch.zeros_like(invDepth, requires_grad=True) # PACOMMENT: This loss calculation is done so that the loss is 0 but it is computed in the same way
-                    Ll1 = l1_loss(gt_image, gt_image)
-                    Lssim = (1.0 - ssim(gt_image, gt_image))
-                    photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim
-                    loss = photo_loss.clone()
+                # else: # PACOMMENT: My first implementation for the depth only loss
+                #     gt_image = torch.zeros_like(invDepth, requires_grad=True) # PACOMMENT: This loss calculation is done so that the loss is 0 but it is computed in the same way
+                #     Ll1 = l1_loss(gt_image, gt_image)
+                #     Lssim = (1.0 - ssim(gt_image, gt_image))
+                #     photo_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * Lssim
+                #     loss = photo_loss.clone()
                 
-                # Depth Loss
-                Ll1depth_pure = 0.0
-                if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
-                    mono_invdepth = viewpoint_cam.invdepthmap.cuda()
-                    depth_mask = viewpoint_cam.depth_mask.cuda()
+                if not is_depth_only: # PACOMMENT: Added this condition
+                    # Depth Loss
+                    Ll1depth_pure = 0.0
+                    if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
+                        mono_invdepth = viewpoint_cam.invdepthmap.cuda()
+                        depth_mask = viewpoint_cam.depth_mask.cuda()
 
-                    Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean()
-                    Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure 
-                    loss += Ll1depth
-                    Ll1depth = Ll1depth.item()
-                else:
-                    Ll1depth = 0
-                
-                # # Pointcloud GT Loss
-                # if dataset.gt_point_cloud_constraints and gaussians.gt_point_cloud is not None: # PACOMMENT: Added this, a thought must be made about the weights
-                #     # Use visibility_filter to select only visible Gaussians
-                #     visible_gaussians_xyz = gaussians._xyz[visibility_filter]
-                #     _, _, wrong_points = gaussians.compare_points_to_gt(visible_gaussians_xyz)
-                #     loss += wrong_points / len(visible_gaussians_xyz)
+                        Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean()
+                        Ll1depth = depth_l1_weight(iteration) * Ll1depth_pure 
+                        loss += Ll1depth
+                        Ll1depth = Ll1depth.item()
+                    else:
+                        Ll1depth = 0
+                else: # PACOMMENT: Added this condition (TO IMPLEMENT)
+                    # Depth Loss
+                    Ll1depth_pure = 0.0
+                    if viewpoint_cam.depth_reliable: # PACOMMENT: I believe in the best iteration i did not have the scheduler
+                        mono_invdepth = viewpoint_cam.invdepthmap.cuda()
+                        depth_mask = viewpoint_cam.depth_mask.cuda()
 
+                        Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean() # PACOMMENT: This is a hack to make the depth loss more significant
+                        Ll1depth = Ll1depth_pure
+                        loss = Ll1depth.clone()
+                        Ll1depth = Ll1depth.item()
+                    else:
+                        print("This is a depth only iteration and the depth is not reliable")
+                        Ll1depth = 0
+                        loss = torch.tensor([0.0], requires_grad=True, device="cuda") # Ensure loss is differentiable
+                    
                 loss.backward()
                 iter_end.record()
 
                 with torch.no_grad():
                     # Progress bar
                     if not is_depth_only: # PACOMMENT: Added this condition
-                        ema_loss_for_log = 0.4 * photo_loss.item() + 0.6 * ema_loss_for_log
+                        ema_photo_loss_for_log = 0.4 * photo_loss.item() * 0.6 * ema_photo_loss_for_log
+                    else:
+                        ema_photo_loss_for_log = 0.6 * ema_photo_loss_for_log
                     ema_Ll1depth_for_log = 0.4 * Ll1depth + 0.6 * ema_Ll1depth_for_log
+
+                    ema_loss_for_log = ema_photo_loss_for_log + ema_Ll1depth_for_log
+
                     if iteration % 10 == 0:
-                        progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{7}f}", "Size": f"{gaussians._xyz.size(0)}"})
+                        progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{5}f}", "Size": f"{gaussians._xyz.size(0)}"}) # "Photo": f"{ema_photo_loss_for_log:.{5}f}", "Depth Loss": f"{ema_Ll1depth_for_log:.{5}f}",
                         progress_bar.update(10)
 
                     # Log and save
@@ -175,9 +187,9 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                     
                     # Densification
                     if iteration < opt.densify_until_iter:
-                        # Keep track of max radii in image-space for pruning
+                        
                         gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii)
-                        gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter)
+                        gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, is_depth_only)
 
                         if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                             gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, dataset.gt_point_cloud_constraints)
@@ -191,10 +203,13 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                             gaussians._features_dc.grad.zero_()
                         if gaussians._features_rest.grad is not None:
                             gaussians._features_rest.grad.zero_()
+                        if gaussians._exposure.grad is not None:
+                            gaussians._exposure.grad.zero_()
 
                     # Optimizer step
                     if iteration < opt.iterations:
-                        gaussians.exposure_optimizer.step()
+                        if not is_depth_only: # PACOMMENT: Added this condition
+                            gaussians.exposure_optimizer.step()
                         gaussians.exposure_optimizer.zero_grad(set_to_none = True)
 
                         if gaussians._xyz.grad != None and gaussians.skybox_locked:

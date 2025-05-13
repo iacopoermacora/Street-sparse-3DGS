@@ -22,10 +22,6 @@ def copy_folders(source_dir):
     
     folders_to_copy = ["output"]
 
-    if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images")) or not os.path.exists(os.path.join(args.project_dir, "inputs")):
-        print("Error: the 'ss_raw_images' and 'inputs' folders do not exist in the current directory. Please make sure to have the correct folder structure before importing data.")
-        return
-
     # Check if the folders already exist in the current directory
     for folder in folders_to_copy:
         if os.path.exists(os.path.join(args.project_dir, folder)):
