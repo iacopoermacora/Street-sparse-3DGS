@@ -872,7 +872,7 @@ class GaussianModel:
         
         start_time = time.time()
         
-        distance_threshold = 0.1  # 10 cm threshold
+        distance_threshold = 0.15  # 15 cm threshold
         
         # Get current points
         xyz = self.get_xyz.detach()

@@ -39,8 +39,15 @@ def render_one_group_shifted(args, scene, pipe, out_dir, new_x, new_y, new_z):
     # Take the first group with 10 cameras
     grouped = {k: v for k, v in grouped.items() if len(v) >= 1}
 
-    print(f"Grouped sample: {grouped.keys()}")
-    print(f"Found {len(grouped)} groups of cameras with 10 views")
+    # Print camera name and coordinates for each group
+    for position, cameras_in_group in grouped.items():
+        # Get the first camera in this group to display its name
+        representative_camera = cameras_in_group[0]
+        print(f"Position {position}: {len(cameras_in_group)} cameras")
+        print(f"  Sample camera name: {representative_camera.image_name}")
+        print(f"  X: {position[0]:.4f}, Y: {position[1]:.4f}, Z: {position[2]:.4f}")
+        print("------")
+    
     chosen_key = next(iter(grouped))  # take the first group
     group = grouped[chosen_key]
     print(f"Using camera group with center = {chosen_key}, {len(group)} views")

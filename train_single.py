@@ -145,12 +145,14 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 else: # PACOMMENT: Added this condition (TO IMPLEMENT)
                     # Depth Loss
                     Ll1depth_pure = 0.0
-                    if viewpoint_cam.depth_reliable: # PACOMMENT: I believe in the best iteration i did not have the scheduler
+                    if viewpoint_cam.depth_reliable:
                         mono_invdepth = viewpoint_cam.invdepthmap.cuda()
                         depth_mask = viewpoint_cam.depth_mask.cuda()
-
-                        Ll1depth_pure = torch.abs((invDepth  - mono_invdepth) * depth_mask).mean() # PACOMMENT: This is a hack to make the depth loss more significant
-                        Ll1depth = Ll1depth_pure
+                            
+                        Ll1depth_pure = torch.abs((invDepth - mono_invdepth) * depth_mask).mean()
+                        Ll1depth_dens = (mono_invdepth - invDepth).clamp(min=0).mean()
+                        
+                        Ll1depth = 0.1 * Ll1depth_pure + 0.9 * Ll1depth_dens
                         loss = Ll1depth.clone()
                         Ll1depth = Ll1depth.item()
                     else:
