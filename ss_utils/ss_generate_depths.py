@@ -20,7 +20,7 @@ import time
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--project_dir', type=str, required=True)
-    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='4', choices=['1', '2', '3', '4'], help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
     args = parser.parse_args()
 
     # Prompt the user to prevent execution of the script if not in a x server environment
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     start_time = time.time()
 
     # If the augmented recording details file already exists, skip this step
-    if not os.path.exists(os.path.join(args.project_dir, "ss_raw_images", "recording_details_augmented.json")):
+    if not os.path.exists(os.path.join(args.project_dir, "camera_calibration", "extras", "recording_details_augmented.json")):
         augment_recording_details = [
                     "python", f"ss_utils/depth_scripts/augment_recording_details.py",
                     "--project_dir", args.project_dir,
@@ -221,7 +221,7 @@ if __name__ == "__main__":
                     "-e", f"LD_LIBRARY_PATH=/cityfusion_master/build/third_party/opt/cityfusion/lib",
                     "gpuproc02.cyclomedia001.cyclomedia.intern:5000/cm-gpuproc-dev:4.31",
                     "/cityfusion_master/build/debug/experimental/cityfusion/tools/gaussian_splatting/json_rds_to_stations/json_rds_to_stations",
-                    f"{args.project_dir}/ss_raw_images/recording_details_augmented.json",
+                    f"{args.project_dir}/camera_calibration/extras/recording_details_augmented.json",
                     f"{args.project_dir}/camera_calibration/depth_files/total.stations",
                 ]
         try:

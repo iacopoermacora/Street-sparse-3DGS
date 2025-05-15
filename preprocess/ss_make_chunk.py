@@ -33,23 +33,6 @@ import open3d as o3d
 import time
 import trimesh
 
-def convert_ply_to_float(ply_path):
-    """
-    Loads a PLY file using trimesh, converts its vertex positions
-    from double to float (32-bit) and re-exports it.
-    """
-    try:
-        # Load without processing to preserve original data layout
-        cloud = trimesh.load(ply_path, process=False)
-        if hasattr(cloud, 'vertices'):
-            cloud.vertices = cloud.vertices.astype(np.float32)
-            cloud.export(ply_path)
-            print(f"Converted {ply_path} vertices to float32.")
-        else:
-            print(f"No vertices found in {ply_path}.")
-    except Exception as e:
-        print(f"Error converting {ply_path}: {e}")
-
 def process_lidar_points(input_files_path, center, extent, chunk_path):
     """
     Reads and downsamples LiDAR points using voxel-based downsampling.
@@ -66,6 +49,23 @@ def process_lidar_points(input_files_path, center, extent, chunk_path):
                and colors is an Nx3 array of RGB values (0-255)
     """
     start_time = time.time()
+
+    def convert_ply_to_float(ply_path):
+        """
+        Loads a PLY file using trimesh, converts its vertex positions
+        from double to float (32-bit) and re-exports it.
+        """
+        try:
+            # Load without processing to preserve original data layout
+            cloud = trimesh.load(ply_path, process=False)
+            if hasattr(cloud, 'vertices'):
+                cloud.vertices = cloud.vertices.astype(np.float32)
+                cloud.export(ply_path)
+                print(f"Converted {ply_path} vertices to float32.")
+            else:
+                print(f"No vertices found in {ply_path}.")
+        except Exception as e:
+            print(f"Error converting {ply_path}: {e}")
 
     def downsample_for_max_density(pcd, max_density):
         """Downsamples a point cloud to ensure its density does not exceed max_density."""
@@ -619,17 +619,6 @@ if __name__ == '__main__':
             chunk_pcd = make_chunk(i, j, n_width, n_height)
             if chunk_pcd is not None:
                 total_pcd += chunk_pcd
-    
-    # total_ply = os.path.join(args.project_dir, "camera_calibration/depth_files/vis2mesh/total.ply")
-
-    # if not os.path.exists(os.path.dirname(total_ply)):
-    #     os.makedirs(os.path.dirname(total_ply))
-    #     os.chmod(os.path.dirname(total_ply), 0o777)
-        
-    # o3d.io.write_point_cloud(total_ply, total_pcd)
-
-    # # Convert the total ply file from double to float using trimesh
-    # convert_ply_to_float(total_ply)
 
     if os.path.exists(test_file):
         with open(f"{args.base_dir}/blending_dict.json", "w") as f:

@@ -208,7 +208,7 @@ if __name__ == "__main__":
 
     raw_input = f"{args.project_dir}/ss_raw_images"
     raw_image_input = f"{raw_input}/images/level_2/color"
-    json_file = os.path.join(raw_input, "recording_details_train_test.json")
+    json_file = os.path.join(args.project_dir, "camera_calibration", "extras", "recording_details_train_test.json")
     image_info = parse_json(json_file)
     sorted_images = sort_images_by_time(image_info)
 

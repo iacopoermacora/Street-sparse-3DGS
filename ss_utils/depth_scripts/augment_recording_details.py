@@ -266,7 +266,7 @@ def parse_iso_timestamp(timestamp_str):
     
     return datetime.fromisoformat(timestamp_str)
 
-def interpolate_recordings(json_data, all_image_names, image_name_to_id_map, translation, faces):
+def interpolate_recordings(json_data, all_image_names, image_name_to_id_map, translation, faces, num_interpolations=1):
     """
     Process the recordings and insert new ones based on multiple criterias.
     Filter recordings to include only those present in COLMAP
@@ -279,6 +279,7 @@ def interpolate_recordings(json_data, all_image_names, image_name_to_id_map, tra
         image_name_to_id_map (dict): Mapping from image names to IDs.
         translation (tuple): Translation values for x and y axes.
         faces (list): List of camera faces to consider.
+        num_interpolations (int): Number of images to interpolate between each pair of recordings.
     Returns:
         tuple: A tuple containing new recordings, augmented COLMAP images, updated all_image_names, and image_name_to_id_map.
     """
@@ -305,98 +306,98 @@ def interpolate_recordings(json_data, all_image_names, image_name_to_id_map, tra
         # Calculate distance between points
         distance = calculate_distance(current["X"], current["Y"], next_rec["X"], next_rec["Y"])
         
-        # Check if they meet our criteria for inserting a new recording
+        # Check if they meet our criteria for inserting new recording(s)
         if distance < 10:
-            # Generate a new unique ImageId
-            new_image_name = generate_unique_image_name(all_image_names)
+            # Generate interpolation points based on the number requested
+            # For n interpolations, we need n+1 segments, so generate n points
+            if num_interpolations > 0:
+                insertion_points = [(j+1)/(num_interpolations+1) for j in range(num_interpolations)]
+            else:
+                insertion_points = []  # No interpolations needed
             
-            # Create a new recording with averaged values
-            new_recording = {}
-            for key in current.keys():
-                if key == "ImageId":
-                    new_recording[key] = new_image_name
-                elif key == "ImageFolder":
-                    # Keep the same image folder
-                    new_recording[key] = current[key]
-                elif key == "Dataset":
-                    # Keep the same dataset
-                    new_recording[key] = current[key]
-                elif key == "DepthmapParamsRef" or key == "ImageParamsRef" or key == "CameraParamsRef":
-                    # Keep the same reference parameters
-                    new_recording[key] = current[key]
-                elif key == "IsInAreaBuffer":
-                    # Keep logical values the same
-                    new_recording[key] = current[key]
-                elif key == "RecordingTimeGps":
-                    # Calculate middle timestamp
-                    time1 = parse_iso_timestamp(current['RecordingTimeGps'])
-                    time2 = parse_iso_timestamp(next_rec['RecordingTimeGps'])
-                    time_diff = (time2 - time1).total_seconds() / 2
-                    middle_time = time1.timestamp() + time_diff
-                    middle_datetime = datetime.fromtimestamp(middle_time).isoformat().replace('+00:00', 'Z')
-                    new_recording[key] = middle_datetime
-                else:
-                    # For all numeric values, take the average
-                    try:
-                        new_recording[key] = (current[key] + next_rec[key]) / 2
-                    except (TypeError, ValueError):
-                        # If not numeric, keep the current value
+            for point in insertion_points:
+                # Generate a new unique ImageId
+                new_image_name = generate_unique_image_name(all_image_names)
+                
+                # Create a new recording with interpolated values
+                new_recording = {}
+                for key in current.keys():
+                    if key == "ImageId":
+                        new_recording[key] = new_image_name
+                    elif key == "ImageFolder" or key == "Dataset" or key == "DepthmapParamsRef" or key == "ImageParamsRef" or key == "CameraParamsRef" or key == "IsInAreaBuffer":
+                        # Keep the same values for these fields
                         new_recording[key] = current[key]
-        
-            # Add the new recording and image_id to the collections
-            new_recordings.append(new_recording)
-            all_image_names.add(new_image_name)
+                    elif key == "RecordingTimeGps":
+                        # Calculate interpolated timestamp
+                        time1 = parse_iso_timestamp(current['RecordingTimeGps'])
+                        time2 = parse_iso_timestamp(next_rec['RecordingTimeGps'])
+                        time_diff = (time2 - time1).total_seconds() * point
+                        interpolated_time = time1.timestamp() + time_diff
+                        interpolated_datetime = datetime.fromtimestamp(interpolated_time).isoformat().replace('+00:00', 'Z')
+                        new_recording[key] = interpolated_datetime
+                    else:
+                        # For numeric values, interpolate based on the point
+                        try:
+                            new_recording[key] = current[key] + (next_rec[key] - current[key]) * point
+                        except (TypeError, ValueError):
+                            # If not numeric, keep the current value
+                            new_recording[key] = current[key]
             
-            # Prepare COLMAP data for this augmented image
-            # We'll create entries for each face
-            for face in faces:
-                # Compute extrinsics
-                rotation_matrix = compute_extrinsics(face, new_recording["VehicleDirection"], new_recording["Yaw"])
-                position = [new_recording["X"] - x_translation, new_recording["Y"] - y_translation, new_recording["Height"]]
-                translation_vector = calculate_translation(rotation_matrix, position)
+                # Add the new recording and image_id to the collections
+                new_recordings.append(new_recording)
+                all_image_names.add(new_image_name)
                 
-                # Get camera number for the current face (for naming only)
-                if args.directions == '1':
-                    cam_n = {
-                        'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
-                    }[face]
-                elif args.directions == '2' or args.directions == '3':
-                    cam_n = {
-                        'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
-                    }[face]
-                elif args.directions == '4':
-                    cam_n = {
-                        'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
-                    }[face]
-            
-                # Create a unique index for this augmented image if it does not already have an assigned number
-                if new_image_name not in image_name_to_id_map:
-                    image_name_to_id_map[new_image_name] = cyclomedia_station_number
-                    cyclomedia_station_number += 1
-                    idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
-                else:
-                    idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
-                image_name = f"cam{cam_n}/{idx_str}_{new_image_name}_{face}.jpg"
+                # Prepare COLMAP data for this augmented image
+                # We'll create entries for each face
+                for face in faces:
+                    # Compute extrinsics
+                    rotation_matrix = compute_extrinsics(face, new_recording["VehicleDirection"], new_recording["Yaw"])
+                    position = [new_recording["X"] - x_translation, new_recording["Y"] - y_translation, new_recording["Height"]]
+                    translation_vector = calculate_translation(rotation_matrix, position)
+                    
+                    # Get camera number for the current face (for naming only)
+                    if args.directions == '1':
+                        cam_n = {
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4
+                        }[face]
+                    elif args.directions == '2' or args.directions == '3':
+                        cam_n = {
+                            'f1': 1, 'f2': 2, 'r1': 3, 'r2': 4, 'b1': 5, 'b2': 6, 'l1': 7, 'l2': 8, 'u1': 9, 'u2': 10
+                        }[face]
+                    elif args.directions == '4':
+                        cam_n = {
+                            'f1': 1, 'r1': 2, 'b1': 3, 'l1': 4, 'u1': 5, 'u2': 6
+                        }[face]
                 
-                # Convert rotation matrix to quaternion
-                qvec = rotmat2qvec(rotation_matrix)
-                
-                # Create a COLMAP Image object that's compatible with write_model
-                augmented_colmap_images[colmap_position_number] = Image(
-                    id=colmap_position_number,
-                    qvec=qvec,
-                    tvec=translation_vector,
-                    camera_id=1,  # Use camera ID 1 for all images
-                    name=image_name,
-                    xys=np.array([], dtype=np.float64).reshape(0, 2),
-                    point3D_ids=np.array([], dtype=np.int64)
-                )
-                
-                colmap_position_number += 1
+                    # Create a unique index for this augmented image if it does not already have an assigned number
+                    if new_image_name not in image_name_to_id_map:
+                        image_name_to_id_map[new_image_name] = cyclomedia_station_number
+                        cyclomedia_station_number += 1
+                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
+                    else:
+                        idx_str = f"{image_name_to_id_map[new_image_name]:04d}"
+                    image_name = f"cam{cam_n}/{idx_str}_{new_image_name}_{face}.jpg"
+                    
+                    # Convert rotation matrix to quaternion
+                    qvec = rotmat2qvec(rotation_matrix)
+                    
+                    # Create a COLMAP Image object that's compatible with write_model
+                    augmented_colmap_images[colmap_position_number] = Image(
+                        id=colmap_position_number,
+                        qvec=qvec,
+                        tvec=translation_vector,
+                        camera_id=1,  # Use camera ID 1 for all images
+                        name=image_name,
+                        xys=np.array([], dtype=np.float64).reshape(0, 2),
+                        point3D_ids=np.array([], dtype=np.int64)
+                    )
+                    
+                    colmap_position_number += 1
         else:
-            skipped_distance+=1
+            skipped_distance += 1
     
-    print(f"Added {len(new_recordings)} new recordings. Skipped {skipped_distance} due to distance constraints")
+    mode_str = f"{num_interpolations} interpolation(s)"
+    print(f"Added {len(new_recordings)} new recordings using {mode_str}. Skipped {skipped_distance} due to distance constraints")
     print(f"Created {len(augmented_colmap_images)} COLMAP image entries for augmented images")
     
     return new_recordings, augmented_colmap_images
@@ -446,8 +447,8 @@ def process_model():
     try:
         aligned_colmap_path = os.path.join(args.project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
         aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
-        output_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_augmented.json')
-        recording_details_path = os.path.join(args.project_dir, 'ss_raw_images', 'recording_details_train.json')
+        output_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_augmented.json')
+        recording_details_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_train.json')
         translation_json_path = os.path.join(args.project_dir, 'camera_calibration', 'translation.json')
 
         # Define the faces based on chosen directions
@@ -472,7 +473,7 @@ def process_model():
         
         # Process the recordings for this chunk
         new_recordings, augmented_colmap_images = interpolate_recordings(
-            data, all_image_names, image_name_to_id_map, translation, faces
+            data, all_image_names, image_name_to_id_map, translation, faces, args.num_extra_depths
         )
         
         # Write COLMAP images_depths.bin for this chunk
@@ -517,8 +518,9 @@ def collect_all_image_names(project_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Augment recordings and create COLMAP images_depths.bin')
     parser.add_argument('--project_dir', type=str, required=True, help='Path to project directory')
-    parser.add_argument('--directions', type=str, default='3', choices=['1', '2', '3', '4'], 
-                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2')
+    parser.add_argument('--directions', type=str, default='4', choices=['1', '2', '3', '4'], 
+                        help='Camera directions: 1=FRLB, 2=F1F2R1R2B1B2L1L2, 3=F1F2R1R2B1B2L1L2U1U2 or 4=F1R1B1L1U1U2')
+    parser.add_argument('--num_extra_depths', type=int, default=1, help='Number of extra depth images to generate between each consecutive recordings')
     
     args = parser.parse_args()
     process_model()

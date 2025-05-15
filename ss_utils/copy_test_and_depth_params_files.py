@@ -3,7 +3,7 @@ Thesis Project: Street-sparse-3DGS
 Author: Iacopo Ermacora
 Date: 11/2024-06/2025
 
-Description: This script copies the test.txt file from the ss_raw_images directory to the 
+Description: This script copies the test.txt file from the extras directory to the 
 aligned and chunks directories. The test.txt file contains the list of images to be processed as
 test images.
 '''
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     args = argparse.parse_args()
 
     # Define all the paths
-    test_txt_path = os.path.join(args.project_dir, "ss_raw_images", "test.txt")
+    test_txt_path = os.path.join(args.project_dir, "camera_calibration", "extras", "test.txt")
     depth_params_path = os.path.join(args.project_dir, "camera_calibration", "aligned", "sparse", "0", "depth_params.json")
     aligned_path = os.path.join(args.project_dir, "camera_calibration", "aligned", "sparse", "0")
     chunks_path = os.path.join(args.project_dir, "camera_calibration", "chunks")

@@ -227,6 +227,9 @@ def generate_test_file(test_images, metadata, faces, output_dir, image_id_to_ind
         key=lambda x: parse_iso_timestamp(x[1]['RecordingTimeGps'])
     )
     
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
     # Create test.txt file
     with open(os.path.join(output_dir, 'test.txt'), 'w') as f:
         for img_id, record in sorted_test_images:
@@ -290,6 +293,9 @@ def create_filtered_json(image_ids, metadata, output_path, filename):
         record for record in metadata['RecordingProperties'] 
         if record['ImageId'] in image_ids
     ]
+    
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
     
     # Save the new metadata to the specified json file
     with open(os.path.join(output_path, filename), 'w') as f:
@@ -415,28 +421,28 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
         train_images, colmap_image_ids, test_images = select_eval_images(sorted_images, metadata)
         
         # Create recording_details_train.json with the images selected for training
-        create_filtered_json(train_images, metadata, os.path.dirname(recording_details_path), 'recording_details_train.json')
+        create_filtered_json(train_images, metadata, os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train.json')
         
         # Create recording_details_train_test.json with the images selected for both training and testing
-        create_filtered_json(colmap_image_ids, metadata, os.path.dirname(recording_details_path), 'recording_details_train_test.json')
+        create_filtered_json(colmap_image_ids, metadata, os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train_test.json')
         
         # Create consistent mapping from ImageId to index
         image_id_to_index = create_image_id_to_index_mapping(colmap_image_ids, metadata)
         
         # Generate test.txt with consistent indexes
-        generate_test_file(test_images, metadata, faces, os.path.dirname(recording_details_path), image_id_to_index)
+        generate_test_file(test_images, metadata, faces, os.path.join(args.project_dir, "camera_calibration", "extras"), image_id_to_index)
     else:
         print("Running in normal mode")
         # Get all image IDs
         all_image_ids = [img_id for img_id, _ in sorted_images]
         
         # Just copy recording_details.json to recording_details_train.json (there are not train/test images, all images are used for training)
-        truth_path = os.path.join(os.path.dirname(recording_details_path), 'recording_details_train.json')
+        truth_path = os.path.join(os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train.json')
         shutil.copy(recording_details_path, truth_path)
         print(f"Created {truth_path}")
         
         # Also copy recording_details.json to recording_details_train_test.json (there are not train/test images, all images are used for training)
-        colmap_path = os.path.join(os.path.dirname(recording_details_path), 'recording_details_train_test.json')
+        colmap_path = os.path.join(os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train_test.json')
         shutil.copy(recording_details_path, colmap_path)
         print(f"Created {colmap_path}")
         

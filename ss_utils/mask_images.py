@@ -23,6 +23,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
+parser.add_argument('--process_6_images', type=bool, default=False, help="Process 6 images and skip the unnecessary extra ones")
 args = parser.parse_args()
 
 # Flask app
@@ -34,9 +35,12 @@ INPUT_DIR = f"{args.project_dir}/inputs/images" # Used to be /ss_utils/static/im
 OUTPUT_DIR = f"{args.project_dir}/inputs/masks"
 MANUAL_MASKS_DIR = f"{args.project_dir}/ss_utils/mask_utils/manual_masks"
 
+VALID_FACE_SUFFIXES = ["_f1", "_b1", "_l1", "_r1", "_u1", "_u2"]
+
 # List of images and masks
 images_path = []
 masks_path = []
+requires_confirmation = []  # List to track which images need user confirmation
 all_combined_masks = []
 all_masks_to_confirm = []
 all_masks_to_confirm_name = []
@@ -261,6 +265,16 @@ def process_item():
     if loop_index >= len(images_path):  # If all items have been processed
         return redirect(url_for('final_page'))
     
+    if not requires_confirmation[loop_index]:
+        print(f'Skipping image {loop_index} as it does not require confirmation')
+        # Create and save an empty mask
+        output_path = masks_path[loop_index].replace('.jpg', '.png')
+        save_mask(None, output_path, images_path[loop_index])
+        # Move to the next image
+        session['loop_index'] += 1
+        session['loop_confirmations'] = 0
+        return redirect(url_for('process_item'))
+    
     if loop_confirmations == 0:
         print(f'Processing image {loop_index}')
         # Update the check for existing mask to use .png extension
@@ -320,6 +334,13 @@ def serve_image(filename):
     """
     return send_from_directory(INPUT_DIR, filename)
 
+def should_confirm_image(filename):
+    base_name = os.path.basename(filename).split('.')[0]
+    for suffix in VALID_FACE_SUFFIXES:
+        if suffix in base_name:
+            return True
+    return False
+
 # Process all images
 def process_all_images():
     """
@@ -335,8 +356,14 @@ def process_all_images():
                 mask_path = os.path.join(OUTPUT_DIR, relative_path)
                 images_path.append(image_path)
                 masks_path.append(mask_path)
+                if args.process_6_images:
+                    needs_confirmation = should_confirm_image(file)
+                    requires_confirmation.append(needs_confirmation)
+                else:
+                    requires_confirmation.append(True)
 
 # Main entry point
 if __name__ == '__main__':
+
     process_all_images()
     app.run(host="0.0.0.0", port=5001)
