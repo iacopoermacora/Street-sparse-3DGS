@@ -449,6 +449,7 @@ def process_model():
         aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
         output_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_augmented.json')
         recording_details_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_train.json')
+        recording_details_test_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_test.json')
         translation_json_path = os.path.join(args.project_dir, 'camera_calibration', 'translation.json')
 
         # Define the faces based on chosen directions
@@ -481,6 +482,12 @@ def process_model():
 
          # Add all new recordings to the original data
         data["RecordingProperties"].extend(new_recordings)
+
+        with open(recording_details_test_path, 'r') as f_test:
+            test_data = json.load(f_test)
+        
+        # Append all entries from test_data's RecordingProperties to the new data
+        data["RecordingProperties"].extend(test_data["RecordingProperties"])
         
         # Write the updated data to the output file
         with open(output_path, 'w') as f:

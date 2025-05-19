@@ -23,7 +23,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--project_dir', type=str, required=True, help="Path to the project directory")
-parser.add_argument('--process_6_images', type=bool, default=False, help="Process 6 images and skip the unnecessary extra ones")
+parser.add_argument('--process_6_images', action="store_true", default=False, help="Process 6 images and skip the unnecessary extra ones")
 args = parser.parse_args()
 
 # Flask app
@@ -41,6 +41,7 @@ VALID_FACE_SUFFIXES = ["_f1", "_b1", "_l1", "_r1", "_u1", "_u2"]
 images_path = []
 masks_path = []
 requires_confirmation = []  # List to track which images need user confirmation
+
 all_combined_masks = []
 all_masks_to_confirm = []
 all_masks_to_confirm_name = []
@@ -281,17 +282,17 @@ def process_item():
         png_mask_path = masks_path[loop_index].replace('.jpg', '.png')
         if os.path.exists(png_mask_path):
             print(f'Skipping image {loop_index} ({png_mask_path}) as mask already exists')
-            all_combined_masks.append(None)
-            all_masks_to_confirm.append(None)
-            all_masks_to_confirm_name.append(None)
+            # all_combined_masks.append(None)
+            # all_masks_to_confirm.append(None)
+            # all_masks_to_confirm_name.append(None)
             session['loop_index'] += 1
             session['loop_confirmations'] = 0
             return redirect(url_for('process_item'))
         combined_masks, masks_to_confirm, masks_to_confirm_name = detect_and_process(images_path[loop_index], png_mask_path)
         print(f'There are {len(masks_to_confirm)} masks to confirm')
-        all_combined_masks.append(combined_masks)
-        all_masks_to_confirm.append(masks_to_confirm)
-        all_masks_to_confirm_name.append(masks_to_confirm_name)
+        all_combined_masks[loop_index] = combined_masks
+        all_masks_to_confirm[loop_index] = masks_to_confirm
+        all_masks_to_confirm_name[loop_index] = masks_to_confirm_name
     
     # If there are masks to confirm
     if loop_confirmations < len(all_masks_to_confirm[loop_index]):
@@ -366,4 +367,14 @@ def process_all_images():
 if __name__ == '__main__':
 
     process_all_images()
+
+    # Initialize global lists with placeholders
+    num_images = len(images_path)
+    all_combined_masks = [None] * num_images
+    # detect_and_process returns lists for masks_to_confirm and masks_to_confirm_name
+    # So, initialize with empty lists or None, and ensure they are lists before len()
+    all_masks_to_confirm = [[] for _ in range(num_images)]
+    all_masks_to_confirm_name = [[] for _ in range(num_images)]
+
+    
     app.run(host="0.0.0.0", port=5001)

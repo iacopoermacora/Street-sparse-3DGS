@@ -208,8 +208,13 @@ if __name__ == "__main__":
 
     raw_input = f"{args.project_dir}/ss_raw_images"
     raw_image_input = f"{raw_input}/images/level_2/color"
-    json_file = os.path.join(args.project_dir, "camera_calibration", "extras", "recording_details_train_test.json")
-    image_info = parse_json(json_file)
+    json_file_train = os.path.join(args.project_dir, "camera_calibration", "extras", "recording_details_train.json")
+    json_file_test = os.path.join(args.project_dir, "camera_calibration", "extras", "recording_details_test.json")
+    image_info_train = parse_json(json_file_train)
+    image_info_test = parse_json(json_file_test)
+    # Merge the two dictionaries
+    image_info = {**image_info_train, **image_info_test}
+    # Sort images by timestamp
     sorted_images = sort_images_by_time(image_info)
 
     if args.directions == "1":

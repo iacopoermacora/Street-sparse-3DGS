@@ -423,8 +423,8 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
         # Create recording_details_train.json with the images selected for training
         create_filtered_json(train_images, metadata, os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train.json')
         
-        # Create recording_details_train_test.json with the images selected for both training and testing
-        create_filtered_json(colmap_image_ids, metadata, os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train_test.json')
+        # Create recording_details_test.json with the images selected for both training and testing
+        create_filtered_json(test_images, metadata, os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_test.json')
         
         # Create consistent mapping from ImageId to index
         image_id_to_index = create_image_id_to_index_mapping(colmap_image_ids, metadata)
@@ -441,8 +441,8 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
         shutil.copy(recording_details_path, truth_path)
         print(f"Created {truth_path}")
         
-        # Also copy recording_details.json to recording_details_train_test.json (there are not train/test images, all images are used for training)
-        colmap_path = os.path.join(os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train_test.json')
+        # Also copy recording_details.json to recording_details_test.json (there are not train/test images, all images are used for training)
+        colmap_path = os.path.join(os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_test.json')
         shutil.copy(recording_details_path, colmap_path)
         print(f"Created {colmap_path}")
         

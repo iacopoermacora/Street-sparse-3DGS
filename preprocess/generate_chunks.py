@@ -54,16 +54,12 @@ if __name__ == '__main__':
     parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
     parser.add_argument('--LiDAR_downsample_density', type=int, default=500, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
     args = parser.parse_args()
-
-    if args.calibration not in ["sfm", "cal_sfm"]:
-        print("calibration argument should be either sfm or cal_sfm. Exiting.")
-        sys.exit(1)
     
     images_dir, colmap_dir, chunks_dir = setup_dirs(
         args.images_dir,
         args.global_colmap_dir, args.chunks_dir,
         args.project_dir
-    ) 
+    )
 
     if args.use_slurm:
         slurm_args = [
