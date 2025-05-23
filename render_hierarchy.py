@@ -44,6 +44,10 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
     ssims = 0.0
     lpipss = 0.0
 
+    # Initialize metrics for depth evaluation
+    imae_test = 0.0
+    irmse_test = 0.0
+
     cameras = scene.getTestCameras() if eval else scene.getTrainCameras()
 
     for viewpoint in tqdm(cameras):
@@ -80,17 +84,22 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             num_siblings
         )
 
-        image = torch.clamp(render_post(
+        # Enable depth rendering (do_depth=True)
+        render_results = render_post(
             viewpoint, 
             scene.gaussians, 
             pipe, 
             torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32, device="cuda"), 
             render_indices=indices,
-            parent_indices = parent_indices,
-            interpolation_weights = interpolation_weights,
-            num_node_kids = num_siblings, 
-            use_trained_exp=args.train_test_exp
-            )["render"], 0.0, 1.0)
+            parent_indices=parent_indices,
+            interpolation_weights=interpolation_weights,
+            num_node_kids=num_siblings, 
+            use_trained_exp=args.train_test_exp,
+            do_depth=True  # Enable depth rendering
+        )
+
+        image = torch.clamp(render_results["render"], 0.0, 1.0)
+        depth_image = render_results["depth"]  # Get the depth image
 
         gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
 
@@ -103,9 +112,14 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
 
         try:
             torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+
+            # TODO: Save depth image
         except:
             os.makedirs(os.path.dirname(os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png")), exist_ok=True)
             torchvision.utils.save_image(image, os.path.join(render_path, viewpoint.image_name.split(".")[0] + ".png"))
+
+            # TODO: Save depth image
+
         if eval:
             image *= alpha_mask
             gt_image *= alpha_mask
@@ -113,12 +127,36 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             ssims += ssim(image, gt_image).mean().double()
             lpipss += lpips(image, gt_image, net_type='vgg').mean().double()
 
+            # Load the ground truth inverse depth map
+            gt_depth = viewpoint.invdepthmap.to(depth_image.device)
+            
+            # Apply alpha mask to both predicted and ground truth depth
+            valid_mask = (alpha_mask > 0).float()
+            
+            # Apply mask to filter out invalid regions
+            masked_pred_depth = depth_image * valid_mask
+            masked_gt_depth = gt_depth * valid_mask
+            
+            # Calculate iMAE (inverse Mean Absolute Error)
+            abs_diff = torch.abs(masked_pred_depth - masked_gt_depth)
+            imae = torch.sum(abs_diff) / torch.sum(valid_mask)
+            
+            # Calculate iRMSE (inverse Root Mean Square Error)
+            squared_diff = torch.pow(masked_pred_depth - masked_gt_depth, 2)
+            irmse = torch.sqrt(torch.sum(squared_diff) / torch.sum(valid_mask))
+            
+            imae_test += imae.double()
+            irmse_test += irmse.double()
+
         torch.cuda.empty_cache()
+
     if eval and len(scene.getTestCameras()) > 0:
         psnr_test /= len(scene.getTestCameras())
         ssims /= len(scene.getTestCameras())
         lpipss /= len(scene.getTestCameras())
-        print(f"tau: {tau}, PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f}")
+        imae_test /= len(scene.getTestCameras())
+        irmse_test /= len(scene.getTestCameras())
+        print(f"tau: {tau}, PSNR: {psnr_test:.5f} SSIM: {ssims:.5f} LPIPS: {lpipss:.5f} iMAE: {imae_test:.5f} iRMSE: {irmse_test:.5f}")
 
 if __name__ == "__main__":
     # Set up command line argument parser
