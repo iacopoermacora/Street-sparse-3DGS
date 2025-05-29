@@ -518,7 +518,9 @@ def make_chunk(i, j, n_width, n_height):
         excluded_chunks.append([i, j])
         print("Chunk excluded")
         combined_pcd = None
-    return combined_pcd
+        lidar_xyzs = None
+        lidar_colors = None
+    return combined_pcd, lidar_xyzs, lidar_colors
 
 if __name__ == '__main__':
     random.seed(0)
@@ -614,11 +616,43 @@ if __name__ == '__main__':
     n_height = round(extent[1] / args.chunk_size)
 
     total_pcd = o3d.geometry.PointCloud()
+    total_xys = []
+    total_colors = []
     for i in range(n_width):
         for j in range(n_height):
-            chunk_pcd = make_chunk(i, j, n_width, n_height)
+            chunk_pcd, chunk_xyzs, chunk_colors = make_chunk(i, j, n_width, n_height)
             if chunk_pcd is not None:
                 total_pcd += chunk_pcd
+                total_xys.append(chunk_xyzs)
+                total_colors.append(chunk_colors)
+    
+    # Add to the original points3d the new points3d coming from the LiDAR without duplicating the ids
+    if args.LiDAR_initialisation:
+        print("Adding LiDAR points to the original points3D")
+        # Calculate max_id once, outside the loops
+        max_id = max(points3d.keys())
+        
+        # Counter to track total points added so far across all lists
+        point_count = 0
+        for i in range(len(total_xys)):
+            if total_xys[i] is not None and len(total_xys[i]) > 0:
+                for j in range(len(total_xys[i])):
+                    new_id = max_id + point_count + 1
+                    points3d[new_id] = Point3D(
+                        id=new_id,
+                        xyz=total_xys[i][j],
+                        rgb=total_colors[i][j],
+                        error=0.0,  # No error for LiDAR points
+                        image_ids=np.array([]),  # No image associations
+                        point2D_idxs=np.array([]),  # No image associations
+                    )
+                    point_count += 1
+        # Rename the points3d file to points3d_uninitialised.bin
+        if os.path.exists(f"{args.base_dir}/points3D.bin"):
+            os.rename(f"{args.base_dir}/points3D.bin", f"{args.base_dir}/points3D_uninitialised.bin")
+
+        # Save the new points3d to the base_dir in a points3D.bin file
+        write_points3D_binary(points3d, f"{args.base_dir}/points3D.bin")
 
     if os.path.exists(test_file):
         with open(f"{args.base_dir}/blending_dict.json", "w") as f:

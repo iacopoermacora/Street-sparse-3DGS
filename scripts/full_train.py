@@ -60,6 +60,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--additional_depth_maps", action="store_true", default=False) # PACOMMENT: Added this line
     parser.add_argument("--gt_point_cloud_constraints", action="store_true", default=False) # PACOMMENT: Added this line
+    parser.add_argument("--constraint_treshold", default="0.1", help="Treshold for the point cloud constraints, default is 0.1") # PACOMMENT: Added this line
     
     args = parser.parse_args()
     print(args.extra_training_args)
@@ -106,6 +107,7 @@ if __name__ == '__main__':
                 "-i", images_dir, f"-d {depths_dir}", # PACOMMENT: Added the depths dir
                 "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
                 "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
+                "--constraint_treshold", args.constraint_treshold,
                 "--skybox_num", "100000",
                 "--model_path", os.path.join(output_dir, "scaffold")
             ])
@@ -136,6 +138,7 @@ if __name__ == '__main__':
         f"--scaffold_file {output_dir}/scaffold/point_cloud/iteration_30000",
         "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
         "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
+        "--constraint_treshold", args.constraint_treshold,
         "--skybox_locked" 
     ])
     if masks_dir != "":
@@ -152,6 +155,7 @@ if __name__ == '__main__':
         "--opacity_lr 0.01", "--scaling_lr 0.001", "--save_iterations -1",
         "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
         "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
+        "--constraint_treshold", args.constraint_treshold,
         f"-d {depths_dir}", # PACOMMENT: Added this line
         f"-i {images_dir}",  f"--scaffold_file {output_dir}/scaffold/point_cloud/iteration_30000"
     ])

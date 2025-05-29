@@ -33,7 +33,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
     prepare_output_and_logger(dataset)
     if dataset.gt_point_cloud_constraints: # PACOMMENT: added this differentiation
         print("Loading GT point cloud")
-        gaussians = GaussianModel(dataset.sh_degree, f"{dataset.source_path}/chunk.ply")
+        gaussians = GaussianModel(dataset.sh_degree, f"{dataset.source_path}/chunk.ply", constraint_treshold=dataset.constraint_treshold)
     else:
         gaussians = GaussianModel(dataset.sh_degree)
     scene = Scene(dataset, gaussians)
@@ -263,7 +263,7 @@ def prepare_output_and_logger(args):
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
-    lp = ModelParams(parser) # PACOMMENT: Added the additional_depth_maps and the gt_point_cloud_constraints parameters.
+    lp = ModelParams(parser) # PACOMMENT: Added the additional_depth_maps, gt_point_cloud_constraints and constraint treshold parameters.
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")

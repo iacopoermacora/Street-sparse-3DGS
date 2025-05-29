@@ -49,7 +49,7 @@ class GaussianModel:
 
 
 
-    def __init__(self, sh_degree : int, gt_point_cloud_path : str = None):
+    def __init__(self, sh_degree : int, gt_point_cloud_path : str = None, constraint_treshold : float = 0.1):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
         self._xyz = torch.empty(0)
@@ -80,6 +80,8 @@ class GaussianModel:
         self.gt_y_max = None
         if gt_point_cloud_path and os.path.exists(gt_point_cloud_path):
             self.load_gt_point_cloud(gt_point_cloud_path)
+
+        self.constraint_treshold = constraint_treshold
 
         self.setup_functions()
 
@@ -872,7 +874,7 @@ class GaussianModel:
         
         start_time = time.time()
         
-        distance_threshold = 0.15  # 15 cm threshold
+        distance_threshold = self.constraint_treshold  # Constraint threshold
         
         # Get current points
         xyz = self.get_xyz.detach()
