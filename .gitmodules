@@ -23,3 +23,6 @@
 [submodule "vis2mesh"]
 	path = vis2mesh
 	url = https://github.com/iacopoermacora/vis2mesh
+[submodule "ss_utils/segmentation"]
+	path = ss_utils/segmentation
+	url = https://huggingface.co/spaces/iermacora/florence-sam
