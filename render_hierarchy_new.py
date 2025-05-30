@@ -13,6 +13,7 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 import torchvision
 from lpipsPyTorch import lpips
 import torchvision.io # Added for reading segmentation masks
+import numpy as np
 # from PIL import ImageColor # Option for hex to rgb, or use a simpler custom function
 
 from gaussian_hierarchy._C import expand_to_size, get_interpolation_weights
@@ -61,7 +62,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
         print(f"No cameras found for {'evaluation' if eval_mode else 'training'} set. Skipping render_set for tau {tau}.")
         return
 
-    for viewpoint_idx, viewpoint in enumerate(tqdm(cameras, desc=f"Rendering Tau {tau}")):
+    for viewpoint in tqdm(cameras, desc=f"Rendering Tau {tau}"):
         viewpoint=viewpoint
         viewpoint.world_view_transform = viewpoint.world_view_transform.cuda()
         viewpoint.projection_matrix = viewpoint.projection_matrix.cuda()
@@ -168,11 +169,12 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
                     # Construct path to segmentation mask
                     # viewpoint.image_path is the full path to the original image
                     # scene.dataset.source_path is the root for that scene (e.g., /path/to/dataset/scene1)
-                    seg_mask_full_path = os.path.join(args.segmentation_root_folder, viewpoint.image_name)
+                    
+                    segmentation_mask_name = os.path.splitext(viewpoint.image_name)[0] + ".png" # Assuming segmentation masks are named like this
+                    seg_mask_full_path = os.path.join(args.segmentation_root_folder, segmentation_mask_name)
 
                     if not os.path.exists(seg_mask_full_path):
-                        if viewpoint_idx == 0: # Print warning only once per tau, or manage verbosity
-                             print(f"Warning: Segmentation mask not found for {viewpoint.image_name} at {seg_mask_full_path}. Skipping segmented evaluation for this image.")
+                        print(f"Warning: Segmentation mask not found for {viewpoint.image_name} at {seg_mask_full_path}. Skipping segmented evaluation for this image.")
                     else:
                         seg_image_raw = torchvision.io.read_image(seg_mask_full_path).to("cuda") # Reads as [C, H, W], typically C=3 or 4 (RGBA)
 
@@ -181,16 +183,13 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
                         elif seg_image_raw.shape[0] == 3: # If RGB
                             seg_image_rgb = seg_image_raw
                         else:
-                            if viewpoint_idx == 0:
-                                print(f"Warning: Segmentation mask {seg_mask_full_path} has unexpected channel count: {seg_image_raw.shape[0]}. Expected 3 or 4. Skipping.")
+                            print(f"Warning: Segmentation mask {seg_mask_full_path} has unexpected channel count: {seg_image_raw.shape[0]}. Expected 3 or 4. Skipping.")
                             continue # Skip to next viewpoint if seg mask format is wrong
 
                         # Ensure seg_image_rgb matches gt_image dimensions if necessary (it should by now)
                         if seg_image_rgb.shape[1:] != gt_image.shape[1:]:
-                             if viewpoint_idx == 0:
-                                print(f"Warning: Segmentation mask {seg_mask_full_path} ({seg_image_rgb.shape}) does not match image dimensions ({gt_image.shape}). Skipping segmented eval for this image.")
-                             continue
-
+                            print(f"Warning: Segmentation mask {seg_mask_full_path} ({seg_image_rgb.shape}) does not match image dimensions ({gt_image.shape}). Skipping segmented eval for this image.")
+                            continue
 
                         for cat_name, cat_info in CATEGORY_GROUPS.items():
                             target_color_rgb = hex_to_rgb_tensor(cat_info["color"], "cuda") # Tensor [R, G, B] on device
@@ -238,8 +237,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
                             # else: category not present or not overlapping with alpha_mask in this image for RGB, its count won't be incremented.
                 
                 except Exception as e:
-                    if viewpoint_idx == 0 : # Print error only once per tau for broader issues
-                        print(f"Error processing segmentation for {viewpoint.image_name}: {e}. Skipping segmented evaluation for this image.")
+                    print(f"Error processing segmentation for {viewpoint.image_name}: {e}. Skipping segmented evaluation for this image.")
 
 
     torch.cuda.empty_cache()

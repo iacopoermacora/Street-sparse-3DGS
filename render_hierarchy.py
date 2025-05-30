@@ -128,7 +128,7 @@ def render_set(args, scene, pipe, out_dir, tau, eval):
             lpipss += lpips(image, gt_image, net_type='vgg').mean().double()
 
             # Load the ground truth inverse depth map
-            gt_depth = viewpoint.invdepthmap.to(depth_image.device)
+            gt_depth = viewpoint.invdepthmap.cuda()
             
             # Apply alpha mask to both predicted and ground truth depth
             valid_mask = (alpha_mask > 0).float()
