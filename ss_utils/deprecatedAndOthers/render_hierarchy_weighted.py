@@ -2,12 +2,12 @@ import math
 import os
 import torch
 from random import randint
-from utils.loss_utils import ssim
+from utils.loss_utils import ssim, ssim_masked
 from gaussian_renderer import render_post
 import sys
 from scene import Scene, GaussianModel
 from tqdm import tqdm
-from utils.image_utils import psnr
+from utils.image_utils import psnr, psnr_masked
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, OptimizationParams
 import torchvision
@@ -43,20 +43,20 @@ def hex_to_rgb_tensor(hex_color_str, device):
     return torch.tensor([r, g, b], dtype=torch.uint8, device=device)
 
 # EDIT 2: Added helper function for distance-weighted metrics
-def compute_distance_weights(invdepth_map, valid_mask):
+def compute_distance_weights(invdepth_map, alpha_mask):
     """
     Compute distance-based weights for pixels.
     
     Args:
         invdepth_map: Inverse depth map (higher values = closer)
-        valid_mask: Mask of valid pixels
+        alpha_mask: Mask of valid pixels
     """
     # Since we have inverse depth, higher values mean closer
     # We want to weight closer pixels more heavily
     # Normalize inverse depths to [0,1] range for stability
-    invdepth_masked = invdepth_map * valid_mask
+    invdepth_masked = invdepth_map * alpha_mask
     max_invdepth = torch.max(invdepth_masked)
-    min_invdepth = torch.min(invdepth_masked[valid_mask > 0]) if torch.sum(valid_mask) > 0 else 0
+    min_invdepth = torch.min(invdepth_masked[alpha_mask > 0]) if torch.sum(alpha_mask) > 0 else 0
     
     if max_invdepth > min_invdepth:
         weights = (invdepth_masked - min_invdepth) / (max_invdepth - min_invdepth)
@@ -64,17 +64,17 @@ def compute_distance_weights(invdepth_map, valid_mask):
     else:
         weights = torch.ones_like(invdepth_map)
     
-    weights = weights * valid_mask  # Zero out invalid regions
+    weights = weights * alpha_mask  # Zero out invalid regions
     return weights
 
 # EDIT 3: Added helper function for depth stratification
-def get_depth_range_mask(invdepth_map, valid_mask, min_depth, max_depth):
+def get_depth_range_mask(invdepth_map, alpha_mask, min_depth, max_depth):
     """
     Create mask for pixels within a specific depth range.
     
     Args:
         invdepth_map: Inverse depth map
-        valid_mask: Valid pixel mask
+        alpha_mask: Valid pixel mask
         min_depth: Minimum depth (in actual distance units)
         max_depth: Maximum depth (in actual distance units)
     """
@@ -84,26 +84,31 @@ def get_depth_range_mask(invdepth_map, valid_mask, min_depth, max_depth):
     
     # Create range mask
     range_mask = (depth_map >= min_depth) & (depth_map < max_depth)
-    range_mask = range_mask.float() * valid_mask
+    range_mask = range_mask.float() * alpha_mask
     
     return range_mask
 
 # EDIT 4: Modified compute_weighted_metrics function
-def compute_weighted_metrics(image, gt_image, mask, weights=None):
+def compute_weighted_metrics(image, gt_image, alpha_mask, segmentation_mask=None, weights=None):
     """Compute metrics with optional weighting."""
     if weights is not None:
-        # Apply weights to both images and mask
-        weighted_mask = mask * weights
+        # Apply weights to both images and mask NOTE: TO MODIFY
+        weighted_mask = alpha_mask * weights
         masked_image = image * weighted_mask
         masked_gt_image = gt_image * weighted_mask
     else:
-        masked_image = image * mask
-        masked_gt_image = gt_image * mask
+        masked_image = image * alpha_mask
+        masked_gt_image = gt_image * alpha_mask
     
-    # Compute RGB metrics
-    psnr_val = psnr(masked_image, masked_gt_image).mean().double()
-    ssim_val = ssim(masked_image, masked_gt_image).mean().double()
-    lpips_val = lpips(masked_image, masked_gt_image, net_type='vgg').mean().double() # PACOMMENT: Implemented LPIPS with mask only for VGG
+    if segmentation_mask is None:
+        # Compute RGB metrics
+        psnr_val = psnr(masked_image, masked_gt_image).mean().double()
+        ssim_val = ssim(masked_image, masked_gt_image).mean().double()
+        lpips_val = lpips(masked_image, masked_gt_image, net_type='vgg').mean().double()
+    else:
+        psnr_val = psnr_masked(masked_image, masked_gt_image, segmentation_mask).mean().double()
+        ssim_val = ssim_masked(masked_image, masked_gt_image, segmentation_mask).mean().double()
+        lpips_val = lpips(masked_image, masked_gt_image, net_type='vgg', mask=segmentation_mask).mean().double() # PACOMMENT: Implemented LPIPS with mask only for VGG
     
     return psnr_val, ssim_val, lpips_val
 
@@ -243,15 +248,14 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
 
         if eval_mode:
             gt_depth = viewpoint.invdepthmap.cuda() # Ensure gt_depth is on correct device
-            valid_mask = (alpha_mask > 0).float() # This will be [1, H, W]
             
             # EDIT 6: Compute distance weights
-            distance_weights = compute_distance_weights(gt_depth, valid_mask)
+            distance_weights = compute_distance_weights(gt_depth, alpha_mask)
             
             # --- Whole Image Evaluation (Unweighted and Distance-Weighted) ---
             # Unweighted metrics
-            psnr_unwt, ssim_unwt, lpips_unwt = compute_weighted_metrics(image, gt_image, alpha_mask, weights=None)
-            imae_unwt, irmse_unwt = compute_weighted_depth_metrics(depth_image, gt_depth, valid_mask, weights=None)
+            psnr_unwt, ssim_unwt, lpips_unwt = compute_weighted_metrics(image, gt_image, alpha_mask, segmentation_mask=None, weights=None)
+            imae_unwt, irmse_unwt = compute_weighted_depth_metrics(depth_image, gt_depth, alpha_mask, weights=None)
             
             metrics["whole_image"]["unweighted"]["psnr"] += psnr_unwt
             metrics["whole_image"]["unweighted"]["ssim"] += ssim_unwt
@@ -261,8 +265,8 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
             metrics["whole_image"]["unweighted"]["count"] += 1
             
             # Distance-weighted metrics
-            psnr_wt, ssim_wt, lpips_wt = compute_weighted_metrics(image, gt_image, alpha_mask, weights=distance_weights)
-            imae_wt, irmse_wt = compute_weighted_depth_metrics(depth_image, gt_depth, valid_mask, weights=distance_weights)
+            psnr_wt, ssim_wt, lpips_wt = compute_weighted_metrics(image, gt_image, alpha_mask, segmentation_mask=None, weights=distance_weights)
+            imae_wt, irmse_wt = compute_weighted_depth_metrics(depth_image, gt_depth, alpha_mask, weights=distance_weights)
             
             metrics["whole_image"]["distance_weighted"]["psnr"] += psnr_wt
             metrics["whole_image"]["distance_weighted"]["ssim"] += ssim_wt
@@ -273,10 +277,10 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
 
             # EDIT 7: Depth-Stratified Evaluation
             for range_name, min_depth, max_depth in DEPTH_RANGES:
-                range_mask = get_depth_range_mask(gt_depth, valid_mask, min_depth, max_depth)
+                range_mask = get_depth_range_mask(gt_depth, alpha_mask, min_depth, max_depth)
                 
                 if torch.sum(range_mask) > 0:  # Only evaluate if range has valid pixels
-                    psnr_range, ssim_range, lpips_range = compute_weighted_metrics(image, gt_image, range_mask, weights=None)
+                    psnr_range, ssim_range, lpips_range = compute_weighted_metrics(image, gt_image, range_mask, segmentation_mask=None, weights=None)
                     imae_range, irmse_range = compute_weighted_depth_metrics(depth_image, gt_depth, range_mask, weights=None)
                     
                     metrics[f"depth_{range_name}"]["psnr"] += psnr_range
@@ -288,94 +292,89 @@ def render_set(args, scene, pipe, out_dir, tau, eval_mode): # Renamed eval to ev
 
             # --- Per-Category Evaluation (if segmentation folder is provided) ---
             if args.segmentation_root_folder:
-                try:
-                    # Construct path to segmentation mask
-                    # viewpoint.image_path is the full path to the original image
-                    # scene.dataset.source_path is the root for that scene (e.g., /path/to/dataset/scene1)
-                    
-                    segmentation_mask_name = os.path.splitext(viewpoint.image_name)[0] + ".png" # Assuming segmentation masks are named like this
-                    seg_mask_full_path = os.path.join(args.segmentation_root_folder, segmentation_mask_name)
-
-                    if not os.path.exists(seg_mask_full_path):
-                        print(f"Warning: Segmentation mask not found for {viewpoint.image_name} at {seg_mask_full_path}. Skipping segmented evaluation for this image.")
-                    else:
-                        seg_image_raw = torchvision.io.read_image(seg_mask_full_path).to("cuda") # Reads as [C, H, W], typically C=3 or 4 (RGBA)
-
-                        if seg_image_raw.shape[0] == 4: # If RGBA, take RGB
-                            seg_image_rgb = seg_image_raw[:3, :, :]
-                        elif seg_image_raw.shape[0] == 3: # If RGB
-                            seg_image_rgb = seg_image_raw
-                        else:
-                            print(f"Warning: Segmentation mask {seg_mask_full_path} has unexpected channel count: {seg_image_raw.shape[0]}. Expected 3 or 4. Skipping.")
-                            continue # Skip to next viewpoint if seg mask format is wrong
-
-                        # Ensure seg_image_rgb matches gt_image dimensions if necessary (it should by now)
-                        if seg_image_rgb.shape[1:] != gt_image.shape[1:]:
-                            print(f"Warning: Segmentation mask {seg_mask_full_path} ({seg_image_rgb.shape}) does not match image dimensions ({gt_image.shape}). Skipping segmented eval for this image.")
-                            continue
-
-                        for cat_name, cat_info in CATEGORY_GROUPS.items():
-                            target_color_rgb = hex_to_rgb_tensor(cat_info["color"], "cuda") # Tensor [R, G, B] on device
-
-                            # Create category mask (H, W)
-                            category_mask_hw = (seg_image_rgb[0, :, :] == target_color_rgb[0]) & \
-                                             (seg_image_rgb[1, :, :] == target_color_rgb[1]) & \
-                                             (seg_image_rgb[2, :, :] == target_color_rgb[2])
-                            
-                            category_mask_1hw = category_mask_hw.unsqueeze(0).float() # Shape [1, H, W]
-
-                            # Combine with alpha_mask for RGB metrics
-                            final_rgb_eval_mask = alpha_mask * category_mask_1hw # Element-wise product
-                            num_pixels_in_cat_rgb = torch.sum(final_rgb_eval_mask > 0)
-
-                            if num_pixels_in_cat_rgb > 0:
-                                # EDIT 8: Category evaluation with both unweighted and distance-weighted metrics
-                                # Unweighted category metrics
-                                psnr_cat_unwt, ssim_cat_unwt, lpips_cat_unwt = compute_weighted_metrics(
-                                    image, gt_image, final_rgb_eval_mask, weights=None)
-                                
-                                metrics[cat_name]["unweighted"]["psnr"] += psnr_cat_unwt
-                                metrics[cat_name]["unweighted"]["ssim"] += ssim_cat_unwt
-                                metrics[cat_name]["unweighted"]["lpips"] += lpips_cat_unwt
-                                metrics[cat_name]["unweighted"]["count"] += 1
-                                
-                                # Distance-weighted category metrics
-                                cat_distance_weights = distance_weights * category_mask_1hw
-                                psnr_cat_wt, ssim_cat_wt, lpips_cat_wt = compute_weighted_metrics(
-                                    image, gt_image, final_rgb_eval_mask, weights=cat_distance_weights)
-                                
-                                metrics[cat_name]["distance_weighted"]["psnr"] += psnr_cat_wt
-                                metrics[cat_name]["distance_weighted"]["ssim"] += ssim_cat_wt
-                                metrics[cat_name]["distance_weighted"]["lpips"] += lpips_cat_wt
-                                metrics[cat_name]["distance_weighted"]["count"] += 1
-
-                                # Depth metrics for category
-                                final_depth_eval_mask = valid_mask * category_mask_1hw # [1, H, W]
-                                num_pixels_in_cat_depth = torch.sum(final_depth_eval_mask > 0)
-
-                                if num_pixels_in_cat_depth > 0:
-                                    # Unweighted depth metrics
-                                    imae_cat_unwt, irmse_cat_unwt = compute_weighted_depth_metrics(
-                                        depth_image, gt_depth, final_depth_eval_mask, weights=None)
-                                    
-                                    metrics[cat_name]["unweighted"]["imae"] += imae_cat_unwt
-                                    metrics[cat_name]["unweighted"]["irmse"] += irmse_cat_unwt
-                                    
-                                    # Distance-weighted depth metrics
-                                    cat_depth_weights = distance_weights * category_mask_1hw
-                                    imae_cat_wt, irmse_cat_wt = compute_weighted_depth_metrics(
-                                        depth_image, gt_depth, final_depth_eval_mask, weights=cat_depth_weights)
-                                    
-                                    metrics[cat_name]["distance_weighted"]["imae"] += imae_cat_wt
-                                    metrics[cat_name]["distance_weighted"]["irmse"] += irmse_cat_wt
-                                else:
-                                    metrics[cat_name]["unweighted"]["imae"] += 0.0 
-                                    metrics[cat_name]["unweighted"]["irmse"] += 0.0
-                                    metrics[cat_name]["distance_weighted"]["imae"] += 0.0 
-                                    metrics[cat_name]["distance_weighted"]["irmse"] += 0.0
                 
-                except Exception as e:
-                    print(f"Error processing segmentation for {viewpoint.image_name}: {e}. Skipping segmented evaluation for this image.")
+                # Construct path to segmentation mask
+                # viewpoint.image_path is the full path to the original image
+                # scene.dataset.source_path is the root for that scene (e.g., /path/to/dataset/scene1)
+                
+                segmentation_mask_name = os.path.splitext(viewpoint.image_name)[0] + ".png" # Assuming segmentation masks are named like this
+                seg_mask_full_path = os.path.join(args.segmentation_root_folder, segmentation_mask_name)
+
+                if not os.path.exists(seg_mask_full_path):
+                    print(f"Warning: Segmentation mask not found for {viewpoint.image_name} at {seg_mask_full_path}. Skipping segmented evaluation for this image.")
+                else:
+                    seg_image_raw = torchvision.io.read_image(seg_mask_full_path).to("cuda") # Reads as [C, H, W], typically C=3 or 4 (RGBA)
+
+                    if seg_image_raw.shape[0] == 4: # If RGBA, take RGB
+                        seg_image_rgb = seg_image_raw[:3, :, :]
+                    elif seg_image_raw.shape[0] == 3: # If RGB
+                        seg_image_rgb = seg_image_raw
+                    else:
+                        print(f"Warning: Segmentation mask {seg_mask_full_path} has unexpected channel count: {seg_image_raw.shape[0]}. Expected 3 or 4. Skipping.")
+                        continue # Skip to next viewpoint if seg mask format is wrong
+
+                    # Ensure seg_image_rgb matches gt_image dimensions if necessary (it should by now)
+                    if seg_image_rgb.shape[1:] != gt_image.shape[1:]:
+                        print(f"Warning: Segmentation mask {seg_mask_full_path} ({seg_image_rgb.shape}) does not match image dimensions ({gt_image.shape}). Skipping segmented eval for this image.")
+                        continue
+
+                    for cat_name, cat_info in CATEGORY_GROUPS.items():
+                        target_color_rgb = hex_to_rgb_tensor(cat_info["color"], "cuda") # Tensor [R, G, B] on device
+
+                        # Create category mask (H, W)
+                        category_mask_hw = (seg_image_rgb[0, :, :] == target_color_rgb[0]) & \
+                                            (seg_image_rgb[1, :, :] == target_color_rgb[1]) & \
+                                            (seg_image_rgb[2, :, :] == target_color_rgb[2])
+                        
+                        category_mask_1hw = category_mask_hw.unsqueeze(0).float() # Shape [1, H, W]
+
+                        # Combine with alpha_mask for RGB metrics
+                        num_pixels_in_cat_rgb = torch.sum(category_mask_1hw > 0)
+
+                        if num_pixels_in_cat_rgb > 0:
+                            # EDIT 8: Category evaluation with both unweighted and distance-weighted metrics
+                            # Unweighted category metrics
+                            psnr_cat_unwt, ssim_cat_unwt, lpips_cat_unwt = compute_weighted_metrics(
+                                image, gt_image, alpha_mask, segmentation_mask=category_mask_1hw, weights=None)
+                            
+                            metrics[cat_name]["unweighted"]["psnr"] += psnr_cat_unwt
+                            metrics[cat_name]["unweighted"]["ssim"] += ssim_cat_unwt
+                            metrics[cat_name]["unweighted"]["lpips"] += lpips_cat_unwt
+                            metrics[cat_name]["unweighted"]["count"] += 1
+                            
+                            # Distance-weighted category metrics
+                            cat_distance_weights = distance_weights * category_mask_1hw
+                            psnr_cat_wt, ssim_cat_wt, lpips_cat_wt = compute_weighted_metrics(
+                                image, gt_image, alpha_mask, segmentation_mask=category_mask_1hw, weights=cat_distance_weights)
+                            
+                            metrics[cat_name]["distance_weighted"]["psnr"] += psnr_cat_wt
+                            metrics[cat_name]["distance_weighted"]["ssim"] += ssim_cat_wt
+                            metrics[cat_name]["distance_weighted"]["lpips"] += lpips_cat_wt
+                            metrics[cat_name]["distance_weighted"]["count"] += 1
+
+                            # Depth metrics for category
+                            num_pixels_in_cat_depth = torch.sum(category_mask_1hw > 0)
+
+                            if num_pixels_in_cat_depth > 0:
+                                # Unweighted depth metrics
+                                imae_cat_unwt, irmse_cat_unwt = compute_weighted_depth_metrics(
+                                    depth_image, gt_depth, alpha_mask*category_mask_1hw, weights=None)
+                                
+                                metrics[cat_name]["unweighted"]["imae"] += imae_cat_unwt
+                                metrics[cat_name]["unweighted"]["irmse"] += irmse_cat_unwt
+                                
+                                # Distance-weighted depth metrics
+                                cat_depth_weights = distance_weights * category_mask_1hw
+                                imae_cat_wt, irmse_cat_wt = compute_weighted_depth_metrics(
+                                    depth_image, gt_depth, alpha_mask*category_mask_1hw, weights=cat_depth_weights)
+                                
+                                metrics[cat_name]["distance_weighted"]["imae"] += imae_cat_wt
+                                metrics[cat_name]["distance_weighted"]["irmse"] += irmse_cat_wt
+                            else:
+                                metrics[cat_name]["unweighted"]["imae"] += 0.0 
+                                metrics[cat_name]["unweighted"]["irmse"] += 0.0
+                                metrics[cat_name]["distance_weighted"]["imae"] += 0.0 
+                                metrics[cat_name]["distance_weighted"]["irmse"] += 0.0
 
 
     torch.cuda.empty_cache()

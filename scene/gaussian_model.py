@@ -709,8 +709,6 @@ class GaussianModel:
         if num_new_points > 0:
             self.newly_split_points_mask[-num_new_points:] = True
 
-        print(f"Number of gaussians that were split: {selected_pts_mask.sum()}")
-
     def densify_and_clone(self, grads, grad_threshold, scene_extent):
         # Extract points that satisfy the gradient condition (not is_depth_only)
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) * self.max_radii2D * torch.pow(self.get_opacity.flatten(), 1/5.0) >= grad_threshold, True, False)
@@ -731,8 +729,6 @@ class GaussianModel:
         new_rotation = self._rotation[selected_pts_mask]
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
-
-        print(f"Number of gaussians that were cloned: {selected_pts_mask.sum()}")
 
     def densify_and_prune(self, max_grad, min_opacity, extent, gt_point_cloud_constraints):
         grads = self.xyz_gradient_accum 
@@ -866,7 +862,6 @@ class GaussianModel:
             prune_mask: Boolean mask where True indicates points that should be pruned
                     (further than threshold from ground truth AND not in scaffold)
         """
-        print("Checking point distances to ground truth point cloud for pruning")
 
         if self.gt_point_cloud is None:
             print("No ground truth point cloud available, skipping distance-based pruning")
@@ -894,7 +889,6 @@ class GaussianModel:
         # Don't check protected points (like newly split points)
         if protected_mask is not None:
             points_to_check_mask = torch.logical_and(points_to_check_mask, ~protected_mask)
-            print(f"Protected {protected_mask.sum().item()} newly split points from pruning")
         
         # Also limit to points within GT bounds
         within_gt_bounds_mask = (
@@ -914,7 +908,6 @@ class GaussianModel:
         
         # If no points need checking, return the existing mask
         if len(indices_to_check) == 0:
-            print("No points need distance checking")
             return existing_mask if existing_mask is not None else torch.zeros(xyz.shape[0], dtype=bool, device=xyz.device)
         
         # Extract only the points we need to check
@@ -960,16 +953,10 @@ class GaussianModel:
         if existing_mask is not None:
             overlap_mask = torch.logical_and(existing_mask, protected_mask)
             overlap_count = overlap_mask.sum().item()
-            print(f"Overlap between existing mask and protected mask: {overlap_count} points")
         
         # Count how many additional points will be pruned due to distance constraint
         additional_pruned = torch.sum(distance_prune_mask_full).item()
         total_pruned = torch.sum(combined_prune_mask).item()
         total_points_checked = len(indices_to_check)
-        
-        print(f"Checked distances for {total_points_checked} out of {len(xyz)} points")
-        print(f"Distance constraint will prune additional {additional_pruned} points")
-        print(f"Total points to be pruned: {total_pruned} out of {len(xyz)}")
-        print(f"Distance checking took {time.time() - start_time:.2f} seconds")
         
         return combined_prune_mask

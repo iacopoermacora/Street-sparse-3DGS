@@ -448,6 +448,7 @@ def process_model():
         aligned_colmap_path = os.path.join(args.project_dir, 'camera_calibration', 'aligned', 'sparse', '0')
         aligned_images_depths_path = os.path.join(aligned_colmap_path, 'images_depths.bin')
         output_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_augmented.json')
+        output_depths_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_depths.json')
         recording_details_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_train.json')
         recording_details_test_path = os.path.join(args.project_dir, 'camera_calibration', 'extras', 'recording_details_test.json')
         translation_json_path = os.path.join(args.project_dir, 'camera_calibration', 'translation.json')
@@ -480,7 +481,16 @@ def process_model():
         # Write COLMAP images_depths.bin for this chunk
         write_colmap_images(aligned_images_depths_path, augmented_colmap_images)
 
-         # Add all new recordings to the original data
+        # Make a copy of data, get rid of the recordings and insert only the new recordings
+        new_data = data.copy()
+        new_data["RecordingProperties"] = []
+        new_data["RecordingProperties"].extend(new_recordings)
+
+        # Save the new data to the output depth file
+        with open(output_depths_path, 'w') as f:
+            json.dump(new_data, f, indent=2)
+
+        # Add all new recordings to the original data
         data["RecordingProperties"].extend(new_recordings)
 
         with open(recording_details_test_path, 'r') as f_test:

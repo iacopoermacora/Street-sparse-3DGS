@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .networks import get_network, LinLayers
 from .utils import get_state_dict

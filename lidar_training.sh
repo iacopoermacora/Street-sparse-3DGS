@@ -81,14 +81,14 @@ run_and_log() {
 # # Step 6: Generate Depth Maps
 # run_and_log "python ss_utils/ss_generate_depths.py --project_dir ${DATASET_DIR}" "Step 6: Generate Depth Maps"
 
-# Step 7: Generate Chunks
-run_and_log "python preprocess/generate_chunks.py --project_dir ${DATASET_DIR} --LiDAR_initialisation --LiDAR_downsample_density 10000" "Step 7: Generate Chunks"
+# # Step 7: Generate Chunks
+# run_and_log "python preprocess/generate_chunks.py --project_dir ${DATASET_DIR} --LiDAR_initialisation --LiDAR_downsample_density 100" "Step 7: Generate Chunks"
 
-# Step 8: Copy test.txt
-run_and_log "python ss_utils/copy_test_and_depth_params_files.py --project_dir ${DATASET_DIR}" "Step 8: Copy test.txt"
+# # Step 8: Copy test.txt
+# run_and_log "python ss_utils/copy_test_and_depth_params_files.py --project_dir ${DATASET_DIR}" "Step 8: Copy test.txt"
 
 # Step 9: Train and Evaluate the Model without additional and constraint
-run_and_log "python scripts/full_train.py --project_dir ${DATASET_DIR}  --extra_training_args '--exposure_lr_init 0.0 --eval'" "Step 10: Evaluate the Model w/o additional and constraint"
+run_and_log "python scripts/full_train.py --project_dir ${DATASET_DIR} --additional_depth_maps --gt_point_cloud_constraints --extra_training_args '--exposure_lr_init 0.0 --eval'" "Step 10: Evaluate the Model"
 
 # Step 10: Render Evaluation Results
 run_and_log "python render_hierarchy.py -s ${DATASET_DIR}/camera_calibration/aligned --model_path ${DATASET_DIR}/output --hierarchy ${DATASET_DIR}/output/merged.hier --out_dir ${DATASET_DIR}/output/renders --images ${DATASET_DIR}/camera_calibration/rectified/images --eval --scaffold_file ${DATASET_DIR}/output/scaffold/point_cloud/iteration_30000" "Step 11: Render Evaluation Results"

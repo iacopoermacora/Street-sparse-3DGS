@@ -76,10 +76,10 @@ def getNerfppNorm(cam_info):
 def readColmapCameras(cam_extrinsics, cam_intrinsics, depths_params, images_folder, masks_folder, depths_folder, test_cam_names_list):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
-        sys.stdout.write('\r')
-        # the exact output you're looking for:
-        sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
-        sys.stdout.flush()
+        # sys.stdout.write('\r')
+        # # the exact output you're looking for:
+        # sys.stdout.write("Reading camera {}/{}".format(idx+1, len(cam_extrinsics)))
+        # sys.stdout.flush()
 
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
@@ -148,10 +148,10 @@ def readColmapDepthOnlyCameras(path, depths_params, depths_folder, masks_folder)
 
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
-        sys.stdout.write('\r')
-        # the exact output you're looking for:
-        sys.stdout.write("Reading depth-only camera {}/{}".format(idx+1, len(cam_extrinsics)))
-        sys.stdout.flush()
+        # sys.stdout.write('\r')
+        # # the exact output you're looking for:
+        # sys.stdout.write("Reading depth-only camera {}/{}".format(idx+1, len(cam_extrinsics)))
+        # sys.stdout.flush()
 
         extr = cam_extrinsics[key]
         intr = cam_intrinsics[extr.camera_id]
@@ -201,7 +201,7 @@ def readColmapDepthOnlyCameras(path, depths_params, depths_folder, masks_folder)
             is_depth_only=True
         )
         cam_infos.append(cam_info)
-    sys.stdout.write('\n')
+    # sys.stdout.write('\n')
     return cam_infos
 
 def fetchPly(path):

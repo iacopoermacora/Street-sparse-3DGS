@@ -321,6 +321,123 @@ def get_nb_pts(image_metas):
 
     return n_pts + 1
 
+def fill_temporal_gaps_in_chunk(images_depths_out, corner_min, corner_max, args):
+    """
+    Fill temporal gaps in depth images by checking recording order and distance criteria.
+    
+    Args:
+        images_depths_out: Dictionary of depth images already selected for the chunk
+        corner_min, corner_max: Chunk boundaries
+        args: Command line arguments containing project_dir
+    
+    Returns:
+        Updated images_depths_out dictionary with gap-filled images
+    """
+    # Load recording details
+    recording_details_path = os.path.join(args.project_dir, "camera_calibration/extras/recording_details_depths.json")
+    if not os.path.exists(recording_details_path):
+        print(f"Recording details file not found: {recording_details_path}")
+        return images_depths_out
+    
+    with open(recording_details_path, 'r') as f:
+        recording_data = json.load(f)
+    
+    # Extract and sort recording properties by time
+    recording_properties = recording_data.get("RecordingProperties", [])
+    recording_properties.sort(key=lambda x: x["RecordingTimeGps"])
+    
+    # Extract ImageIds from current chunk depth images (convert from colmap format)
+    chunk_image_ids = []
+    for key, image_meta in images_depths_out.items():
+        # Extract ImageId from name like "camx/NUMBER_imageid_FACE.JPG"
+        image_id = image_meta.name.split('/')[-1].split('_')[1]
+        chunk_image_ids.append(image_id)
+    
+    if not chunk_image_ids:
+        return images_depths_out
+    
+    # Find indices of chunk images in the sorted recording list
+    chunk_indices = []
+    for image_id in chunk_image_ids:
+        for i, prop in enumerate(recording_properties):
+            if prop["ImageId"] == image_id:
+                chunk_indices.append(i)
+                break
+    
+    if not chunk_indices:
+        return images_depths_out
+    
+    chunk_indices.sort()
+    
+    def get_distance(prop1, prop2):
+        """Calculate distance between two recording positions"""
+        return np.sqrt((prop1["X"] - prop2["X"])**2 + (prop1["Y"] - prop2["Y"])**2)
+    
+    def add_depth_to_chunk(image_id):
+        """Add an image to the chunk if it exists in images_depth_metas"""
+        for key, image_meta in images_depth_metas.items():
+            existing_image_id = image_meta.name.split('/')[-1].split('_')[1]
+            if existing_image_id == image_id:
+                images_depths_out[key] = Image(
+                    id=key,
+                    qvec=image_meta.qvec,
+                    tvec=image_meta.tvec,
+                    camera_id=image_meta.camera_id,
+                    name=image_meta.name,
+                    xys=image_meta.xys,
+                    point3D_ids=image_meta.point3D_ids
+                )
+    
+    # Check for gaps within the chunk sequence
+    for i in range(len(chunk_indices) - 1):
+        previous_idx = chunk_indices[i-1] if i > 0 else None
+        current_idx = chunk_indices[i]
+        next_idx = chunk_indices[i + 1]
+
+        current_prop = recording_properties[current_idx]
+        
+        # Previous
+        if previous_idx is not None:
+            if current_idx - previous_idx > 1:
+                current_prop = recording_properties[current_idx]
+                actual_previous_prop = recording_properties[current_idx -1]
+
+                # Check if distance between current and actual previous is less than 10m
+                if get_distance(current_prop, actual_previous_prop) < 10.0:
+                    add_depth_to_chunk(actual_previous_prop["ImageId"])
+        
+        # Next
+        if next_idx - current_idx > 1:
+            current_prop = recording_properties[current_idx]
+            actual_next_prop = recording_properties[current_idx + 1]
+            
+            # Check if distance between current and actual next is less than 10m
+            if get_distance(current_prop, actual_next_prop) < 10.0:
+                add_depth_to_chunk(actual_next_prop["ImageId"])
+    
+    # Check image before the first chunk image
+    if chunk_indices[0] > 0:
+        first_prop = recording_properties[chunk_indices[0]]
+        # Check if the index is valid
+        if chunk_indices[0] - 1 >= 0:
+            before_prop = recording_properties[chunk_indices[0] - 1]
+        
+            if get_distance(before_prop, first_prop) < 10.0:
+                add_depth_to_chunk(before_prop["ImageId"])
+    
+    # Check image after the last chunk image
+    if chunk_indices[-1] < len(recording_properties) - 1:
+        last_prop = recording_properties[chunk_indices[-1]]
+
+        # Check if the index is valid
+        if chunk_indices[-1] + 1 < len(recording_properties):
+            after_prop = recording_properties[chunk_indices[-1] + 1]
+        
+            if get_distance(last_prop, after_prop) < 10.0:
+                add_depth_to_chunk(after_prop["ImageId"])
+    
+    return images_depths_out
+
 def make_chunk(i, j, n_width, n_height):
     # in_path = f"{args.base_dir}/chunk_{i}_{j}"
     # if os.path.exists(in_path):
@@ -460,6 +577,9 @@ def make_chunk(i, j, n_width, n_height):
                     xys=images_depth_metas[key].xys,
                     point3D_ids=images_depth_metas[key].point3D_ids
                 )
+        
+        # Fill temporal gaps in depth images
+        images_depths_out = fill_temporal_gaps_in_chunk(images_depths_out, corner_min, corner_max, args)
         
         center = (corner_min + corner_max) / 2
         extent = corner_max - corner_min

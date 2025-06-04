@@ -8,7 +8,7 @@ DATASET_DIR="/host"
 LOG_FILE="${DATASET_DIR}/training_pipeline_timing.txt"
 RESULTS_FILE="${DATASET_DIR}/output/results.txt"
 
-CONSTRAINT_THRESHOLDS=(0.05 0.1 0.3)
+CONSTRAINT_THRESHOLDS=(0.01 0.025)
 
 # Initialize the log file
 echo "Street Sparse 3D Gaussian Splatting Training Pipeline Timing Log" > $LOG_FILE
@@ -93,11 +93,13 @@ run_and_log() {
 for THRESHOLD in "${CONSTRAINT_THRESHOLDS[@]}"; do
   echo "Running with constraint_threshold: ${THRESHOLD}"
 
+  mkdir -p "${DATASET_DIR}/output"
+
   # Step 9: Train and Evaluate the Model with current constraint_treshold
-  run_and_log "python scripts/full_train.py --project_dir ${DATASET_DIR} --extra_training_args --gt_point_cloud_constraints --constraint_treshold ${THRESHOLD} '--exposure_lr_init 0.0 --eval' > ${RESULTS_FILE}" "Step 9: Train and Evaluate the Model w/o additional and constraint (threshold ${THRESHOLD})"
+  run_and_log "python scripts/full_train.py --project_dir ${DATASET_DIR} --gt_point_cloud_constraints --constraint_treshold ${THRESHOLD} --extra_training_args '--exposure_lr_init 0.0 --eval' > ${RESULTS_FILE}" "Step 9: Train and Evaluate the Model w/o additional and constraint (threshold ${THRESHOLD})"
 
   # Step 10: Render Evaluation Results
-  run_and_log "python render_hierarchy.py -s ${DATASET_DIR}/camera_calibration/aligned --model_path ${DATASET_DIR}/output --hierarchy ${DATASET_DIR}/output/merged.hier --out_dir ${DATASET_DIR}/output/renders --images ${DATASET_DIR}/camera_calibration/rectified/images --eval --scaffold_file ${DATASET_DIR}/output/scaffold/point_cloud/iteration_30000 >> ${RESULTS_FILE} 2>&1" "Step 10: Render Evaluation Results (threshold ${THRESHOLD})"
+  run_and_log "python render_hierarchy_weighted.py --segmentation_root_folder ${DATASET_DIR}/camera_calibration/rectified/semantic_segmentation/masks -s ${DATASET_DIR}/camera_calibration/aligned --model_path ${DATASET_DIR}/output --hierarchy ${DATASET_DIR}/output/merged.hier --out_dir ${DATASET_DIR}/output/renders --images ${DATASET_DIR}/camera_calibration/rectified/images --depths ${DATASET_DIR}/camera_calibration/rectified/depths --eval --scaffold_file ${DATASET_DIR}/output/scaffold/point_cloud/iteration_30000 >> ${RESULTS_FILE} 2>&1" "Step 10: Render Evaluation Results (threshold ${THRESHOLD})"
 
   # Rename the output folder
   NEW_OUTPUT_DIR="${DATASET_DIR}/output_CONSTRAINT_${THRESHOLD//./_}" # Replaces '.' with '_' for folder name
