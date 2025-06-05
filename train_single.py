@@ -152,7 +152,7 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                         Ll1depth_pure = torch.abs((invDepth - mono_invdepth) * depth_mask).mean()
                         Ll1depth_dens = (mono_invdepth - invDepth).clamp(min=0).mean()
                         
-                        Ll1depth = 0.1 * Ll1depth_pure + 0.9 * Ll1depth_dens
+                        Ll1depth = args.additional_depth_maps_weight * Ll1depth_dens + (1 - args.additional_depth_maps_weight) * Ll1depth_pure
                         loss = Ll1depth.clone()
                         Ll1depth = Ll1depth.item()
                     else:
@@ -263,7 +263,7 @@ def prepare_output_and_logger(args):
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
-    lp = ModelParams(parser) # PACOMMENT: Added the additional_depth_maps, gt_point_cloud_constraints and constraint treshold parameters.
+    lp = ModelParams(parser) # PACOMMENT: Added the additional_depth_maps, gt_point_cloud_constraints, constraint treshold and additional_depth_maps_weight parameters.
     op = OptimizationParams(parser)
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")

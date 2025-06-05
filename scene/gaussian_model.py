@@ -49,7 +49,7 @@ class GaussianModel:
 
 
 
-    def __init__(self, sh_degree : int, gt_point_cloud_path : str = None, constraint_treshold : float = 0.1):
+    def __init__(self, sh_degree : int, gt_point_cloud_path : str = None, constraint_treshold : float = 0.05):
         self.active_sh_degree = 0
         self.max_sh_degree = sh_degree  
         self._xyz = torch.empty(0)

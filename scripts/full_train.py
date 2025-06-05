@@ -60,7 +60,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--additional_depth_maps", action="store_true", default=False) # PACOMMENT: Added this line
     parser.add_argument("--gt_point_cloud_constraints", action="store_true", default=False) # PACOMMENT: Added this line
-    parser.add_argument("--constraint_treshold", default="0.1", help="Treshold for the point cloud constraints, default is 0.1") # PACOMMENT: Added this line
+    parser.add_argument("--constraint_treshold", default="0.05", help="Treshold for the point cloud constraints, default is 0.05") # PACOMMENT: Added this line
+    parser.add_argument("--additional_depth_maps_weight", default="0.9", help="Weight for the additional depth maps, default is 0.9") # PACOMMENT: Added this line
     
     args = parser.parse_args()
     print(args.extra_training_args)
@@ -108,6 +109,7 @@ if __name__ == '__main__':
                 "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
                 "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
                 "--constraint_treshold", args.constraint_treshold,
+                "--additional_depth_maps_weight", args.additional_depth_maps_weight, # PACOMMENT: Added this line
                 "--skybox_num", "100000",
                 "--model_path", os.path.join(output_dir, "scaffold")
             ])
@@ -139,6 +141,7 @@ if __name__ == '__main__':
         "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
         "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
         "--constraint_treshold", args.constraint_treshold,
+        "--additional_depth_maps_weight", args.additional_depth_maps_weight, # PACOMMENT: Added this line
         "--skybox_locked" 
     ])
     if masks_dir != "":
@@ -156,6 +159,7 @@ if __name__ == '__main__':
         "--additional_depth_maps" if args.additional_depth_maps else "", # PACOMMENT: Added this line
         "--gt_point_cloud_constraints" if args.gt_point_cloud_constraints else "", # PACOMMENT: Added this line
         "--constraint_treshold", args.constraint_treshold,
+        "--additional_depth_maps_weight", args.additional_depth_maps_weight, # PACOMMENT: Added this line
         f"-d {depths_dir}", # PACOMMENT: Added this line
         f"-i {images_dir}",  f"--scaffold_file {output_dir}/scaffold/point_cloud/iteration_30000"
     ])

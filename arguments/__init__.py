@@ -67,7 +67,8 @@ class ModelParams(ParamGroup):
         self.skybox_locked = False
         self.additional_depth_maps = False # PACOMMENT: I added this line
         self.gt_point_cloud_constraints = False # PACOMMENT: I added this line
-        self.constraint_treshold = 0.1 # PACOMMENT: I added this line
+        self.constraint_treshold = 0.05 # PACOMMENT: I added this line
+        self.additional_depth_maps_weight = 0.9 # PACOMMENT: I added this line
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
