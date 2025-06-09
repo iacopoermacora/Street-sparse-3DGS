@@ -438,6 +438,8 @@ def main(recording_details_path, output_dir_bin, cube_face_size, faces, eval_mod
         
         # Just copy recording_details.json to recording_details_train.json (there are not train/test images, all images are used for training)
         truth_path = os.path.join(os.path.join(args.project_dir, "camera_calibration", "extras"), 'recording_details_train.json')
+        if not os.path.exists(os.path.dirname(truth_path)):
+            os.makedirs(os.path.dirname(truth_path))
         shutil.copy(recording_details_path, truth_path)
         print(f"Created {truth_path}")
         

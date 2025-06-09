@@ -50,6 +50,8 @@ if __name__ == "__main__":
             print(f"Error executing prepare_lidar_for_vis2mesh: {e}")
             sys.exit(1)
         print(f"Time taken to prepare the input point cloud: {time.time() - start_time} seconds")
+    else:
+        print("The total.ply file already exists. Skipping this step")
 
     print("#"*30)
     print("Step 2/8: Augmenting the recording details")
@@ -72,6 +74,8 @@ if __name__ == "__main__":
             sys.exit(1)
         
         print(f"Time taken to augment the recording details: {time.time() - start_time} seconds")
+    else:
+        print("The augmented recording details file already exists. Skipping this step")
 
     # Call the colmap_to_vis2mesh.py script to convert the COLMAP model to a custom JSON format
 

@@ -29,24 +29,25 @@ if __name__ == "__main__":
     # Check if the test.txt file exists
     if not os.path.exists(test_txt_path):
         print(f"Error: {test_txt_path} does not exist.")
-        sys.exit(1)
 
     if not os.path.exists(depth_params_path):
         print(f"Error: {depth_params_path} does not exist.")
-        sys.exit(1)
     
     # Copy the test.txt file to the aligned path
-    shutil.copy(test_txt_path, aligned_path)
-    print(f"Copied {test_txt_path} to {aligned_path}")
+    if os.path.exists(test_txt_path):
+        shutil.copy(test_txt_path, aligned_path)
+        print(f"Copied {test_txt_path} to {aligned_path}")
 
-    # Copy the test.txt file and the to each chunk in the chunks path
+    # Copy the test.txt file and the depth_params to each chunk in the chunks path
     chunks_paths = os.listdir(chunks_path)
     for chunk in chunks_paths:
         chunk_path = os.path.join(chunks_path, chunk, "sparse", "0")
         if os.path.exists(chunk_path):
-            shutil.copy(test_txt_path, chunk_path)
-            print(f"Copied {test_txt_path} to {chunk_path}")
-            shutil.copy(depth_params_path, chunk_path)
-            print(f"Copied {depth_params_path} to {chunk_path}")
+            if os.path.exists(test_txt_path):
+                shutil.copy(test_txt_path, chunk_path)
+                print(f"Copied {test_txt_path} to {chunk_path}")
+            if os.path.exists(depth_params_path):
+                shutil.copy(depth_params_path, chunk_path)
+                print(f"Copied {depth_params_path} to {chunk_path}")
         else:
             print(f"Warning: {chunk_path} does not exist. Skipping.")
