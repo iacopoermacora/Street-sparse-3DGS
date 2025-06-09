@@ -657,7 +657,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_type', default="bin")
 
     parser.add_argument('--LiDAR_initialisation', action="store_true", default=False, help="Use this flag to initialise the point cloud with the LiDAR ground truth.")
-    parser.add_argument('--LiDAR_downsample_density', type=int, default=100, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
+    parser.add_argument('--LiDAR_downsample_density', type=int, default=2000, help="Downsample the LiDAR point cloud to this density. The density is in points per cubic meter.")
 
     args = parser.parse_args()
 

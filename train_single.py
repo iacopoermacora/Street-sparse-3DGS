@@ -145,14 +145,14 @@ def training(dataset, opt, pipe, saving_iterations, checkpoint_iterations, check
                 else: # PACOMMENT: Added this condition (TO IMPLEMENT)
                     # Depth Loss
                     Ll1depth_pure = 0.0
-                    if viewpoint_cam.depth_reliable:
+                    if depth_l1_weight(iteration) > 0 and viewpoint_cam.depth_reliable:
                         mono_invdepth = viewpoint_cam.invdepthmap.cuda()
                         depth_mask = viewpoint_cam.depth_mask.cuda()
                             
                         Ll1depth_pure = torch.abs((invDepth - mono_invdepth) * depth_mask).mean()
                         Ll1depth_dens = (mono_invdepth - invDepth).clamp(min=0).mean()
                         
-                        Ll1depth = args.additional_depth_maps_weight * Ll1depth_dens + (1 - args.additional_depth_maps_weight) * Ll1depth_pure
+                        Ll1depth = depth_l1_weight(iteration) * (args.additional_depth_maps_weight * Ll1depth_dens + (1 - args.additional_depth_maps_weight) * Ll1depth_pure)
                         loss = Ll1depth.clone()
                         Ll1depth = Ll1depth.item()
                     else:
