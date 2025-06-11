@@ -17,9 +17,6 @@
 [submodule "submodules/DPT"]
 	path = submodules/DPT
 	url = https://github.com/isl-org/DPT.git
-[submodule "mast3r"]
-	path = mast3r
-	url = https://github.com/naver/mast3r
 [submodule "vis2mesh"]
 	path = vis2mesh
 	url = https://github.com/iacopoermacora/vis2mesh
